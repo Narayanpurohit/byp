@@ -1,13 +1,16 @@
 import re
 import asyncio
+import time
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait, RPCError
+from logger import get_logger
 from config import (
     API_ID, API_HASH, SESSION_STRING,
-    X_BOT_USERNAME, Y_GROUP_ID, BOT_TOKEN
+    X_BOT_USERNAME, Y_GROUP_ID, BOT_TOKEN,
+    STATUS_TIMEOUT
 )
 
-# store pending /check user
-PENDING_CHECK = {}
+log = get_logger("USERBOT")
 
 userbot = Client(
     "userbot",
@@ -16,48 +19,100 @@ userbot = Client(
     session_string=SESSION_STRING
 )
 
-# -------- LINK FLOW --------
+PENDING_CHECK = {}
 
+# ---------- LINK PROCESS ----------
 async def process_link(link):
-    async with userbot:
-        await userbot.send_message(X_BOT_USERNAME, link)
+    try:
+        async with userbot:
+            await userbot.send_message(X_BOT_USERNAME, link)
+            log.info("Link sent to X bot")
 
+    except FloodWait as e:
+        log.warning(f"FloodWait process_link {e.value}s")
+        await asyncio.sleep(e.value)
+
+    except RPCError as e:
+        log.error(f"Telegram RPC error: {e}")
+
+    except Exception as e:
+        log.exception("process_link failed")
+
+# ---------- X BOT REPLY ----------
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
 async def xbot_reply(_, message):
-    if not message.text:
-        return
+    try:
+        if not message.text:
+            return
 
-    # extract mega.nz link
-    match = re.search(r"https?://mega\.nz/\S+", message.text)
-    if match:
-        mega_link = match.group()
-        await userbot.send_message(Y_GROUP_ID, mega_link)
+        match = re.search(r"https?://mega\.nz/\S+", message.text)
+        if not match:
+            return
 
-# -------- /check FLOW --------
+        await userbot.send_message(Y_GROUP_ID,f"/l2 {match.group()}")
+        log.info("Mega link forwarded to Y group")
 
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+
+    except Exception:
+        log.exception("xbot_reply error")
+
+# ---------- /check ----------
 async def check_status(user_id):
-    async with userbot:
-        PENDING_CHECK["user"] = user_id
-        await userbot.send_message(Y_GROUP_ID, "/status2")
+    try:
+        async with userbot:
+            PENDING_CHECK[user_id] = time.time()
+            await userbot.send_message(Y_GROUP_ID, "/status2")
+            log.info(f"/status2 sent for user {user_id}")
 
+    except Exception:
+        log.exception("check_status failed")
+
+# ---------- STATUS REPLY ----------
 @userbot.on_message(filters.chat(Y_GROUP_ID))
 async def status_reply(_, message):
-    if "user" not in PENDING_CHECK:
-        return
+    try:
+        if not message.from_user or not message.from_user.is_bot:
+            return
 
-    # sirf bot reply accept
-    if message.from_user and message.from_user.is_bot:
-        user_id = PENDING_CHECK.pop("user")
+        # timeout cleanup
+        now = time.time()
+        expired = [
+            uid for uid, t in PENDING_CHECK.items()
+            if now - t > STATUS_TIMEOUT
+        ]
+        for uid in expired:
+            PENDING_CHECK.pop(uid, None)
+
+        if not PENDING_CHECK:
+            return
+
+        user_id = next(iter(PENDING_CHECK))
+        PENDING_CHECK.pop(user_id, None)
 
         async with Client(
-            "send_back_bot",
+            "callback_bot",
             api_id=API_ID,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN
         ) as bot:
             await bot.send_message(
                 user_id,
-                f"📊 Status Reply:\n\n{message.text}"
+                f"📊 Status Result:\n\n{message.text}"
             )
 
-userbot.start()
+        log.info(f"Status reply sent to user {user_id}")
+
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+
+    except Exception:
+        log.exception("status_reply error")
+
+# ---------- START USERBOT ----------
+try:
+    log.info("Userbot started")
+    userbot.start()
+except Exception as e:
+    log.critical(f"Userbot crashed: {e}")
