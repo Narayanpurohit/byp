@@ -1,8 +1,8 @@
-API_ID = 123456
-API_HASH = "your_api_hash_here"
+API_ID = 15191874
+API_HASH = "3037d39233c6fad9b80d83bb8a339a07"
 
-BOT_TOKEN = "your_bot_token_here"
-SESSION_STRING = "your_userbot_session_here"
+BOT_TOKEN = "7481801715:AAElYLgvaJ7jm2z-Dyqy96CHQQN7wqYs_Lc"
+SESSION_STRING = "BQGZqnkAtjrfnfxHu49K_E8IAinKmOFMYr_sIRS-gsmD-fTdpJszgAhXy8tQOS-24BMWDPWVktnp0bQDEMJ8QNx2GJCVg1fUq2TcKQcqu5E8zD-rrH7OqsIeGZzhkwzGtuNEeJV8eZ99WBnyvOV2Wmx_4mBSIKmv3WyD53SMcSW24hcov77a3POZOlgAQQ22QsRvIzL43JlOsucnPC2n1lbQWYUDI5fKzJUgZbP-HGE1wvWCmT5xpCG-b68thWJyCQC1qAFEmRgzSsX0n70gEAli08Rg7WraqThiiSHnZfyjRzS9UCFWfsyVkHr1L-DZ3DRQFoQ_dLDk25J_oO2ezZ4zE_FbRwAAAAFNo2ggAA"
 
-X_BOT_USERNAME = "xbotusername"     # without @
-Y_GROUP_ID = -1001234567890         # group id where mega link & /status2 goes
+X_BOT_USERNAME = "Nick_Bypass_Bot"     # without @
+Y_GROUP_ID = -1002882060578         # group id where mega link & /status2 goes
