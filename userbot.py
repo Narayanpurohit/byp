@@ -24,18 +24,17 @@ PENDING_CHECK = {}
 # ---------- LINK PROCESS ----------
 async def process_link(link):
     try:
-        async with userbot:
-            await userbot.send_message(X_BOT_USERNAME, link)
-            log.info("Link sent to X bot")
+        await userbot.send_message(X_BOT_USERNAME, link)
+        log.info("Link sent to X bot")
 
     except FloodWait as e:
         log.warning(f"FloodWait process_link {e.value}s")
         await asyncio.sleep(e.value)
 
     except RPCError as e:
-        log.error(f"Telegram RPC error: {e}")
+        log.error(f"RPC error: {e}")
 
-    except Exception as e:
+    except Exception:
         log.exception("process_link failed")
 
 # ---------- X BOT REPLY ----------
@@ -49,8 +48,14 @@ async def xbot_reply(_, message):
         if not match:
             return
 
-        await userbot.send_message(Y_GROUP_ID,f"/l2 {match.group()}")
-        log.info("Mega link forwarded to Y group")
+        mega_link = match.group()
+
+        await userbot.send_message(
+            Y_GROUP_ID,
+            f"/l2 {mega_link}"
+        )
+
+        log.info("Mega link sent to Y group (/l2 format)")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
@@ -61,10 +66,9 @@ async def xbot_reply(_, message):
 # ---------- /check ----------
 async def check_status(user_id):
     try:
-        async with userbot:
-            PENDING_CHECK[user_id] = time.time()
-            await userbot.send_message(Y_GROUP_ID, "/status2")
-            log.info(f"/status2 sent for user {user_id}")
+        PENDING_CHECK[user_id] = time.time()
+        await userbot.send_message(Y_GROUP_ID, "/status2")
+        log.info(f"/status2 sent for user {user_id}")
 
     except Exception:
         log.exception("check_status failed")
@@ -76,8 +80,8 @@ async def status_reply(_, message):
         if not message.from_user or not message.from_user.is_bot:
             return
 
-        # timeout cleanup
         now = time.time()
+
         expired = [
             uid for uid, t in PENDING_CHECK.items()
             if now - t > STATUS_TIMEOUT
