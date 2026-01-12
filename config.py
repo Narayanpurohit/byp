@@ -6,3 +6,4 @@ SESSION_STRING = "BQGZqnkAtjrfnfxHu49K_E8IAinKmOFMYr_sIRS-gsmD-fTdpJszgAhXy8tQOS
 
 X_BOT_USERNAME = "Nick_Bypass_Bot"     # without @
 Y_GROUP_ID = -1002882060578         # group id where mega link & /status2 goes
+STATUS_TIMEOUT = 60
