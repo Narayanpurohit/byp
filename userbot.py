@@ -5,7 +5,7 @@ from pyrogram.errors import FloodWait
 from logger import get_logger
 from config import (
     API_ID, API_HASH, SESSION_STRING,
-    X_BOT_USERNAME, Y_GROUP_ID
+    X_BOT_USERNAME
 )
 from shared_store import PENDING
 
@@ -36,7 +36,6 @@ async def xbot_reply(_, message):
         if not message.text:
             return
 
-        # extract softurl from reply
         softurl_match = SOFTURL_REGEX.search(message.text)
         if not softurl_match:
             return
@@ -46,7 +45,6 @@ async def xbot_reply(_, message):
         if softurl not in PENDING:
             return
 
-        # extract all links (2 links expected)
         links = URL_REGEX.findall(message.text)
         if len(links) < 2:
             return
@@ -55,44 +53,20 @@ async def xbot_reply(_, message):
 
         chat_id, msg_id = PENDING.pop(softurl)
 
-        original = await userbot.get_messages(chat_id, msg_id)
-        original_text = original.text or original.caption
+        # 🔹 get current message text
+        target = await userbot.get_messages(chat_id, msg_id)
+        current_text = target.text or target.caption
 
-        final_text = original_text.replace(softurl, new_link)
+        updated_text = current_text.replace(softurl, new_link)
 
-        # ----- send same type to Y group -----
-        if original.text:
-            await userbot.send_message(Y_GROUP_ID, final_text)
+        # 🔹 edit SAME message in Y chat
+        await userbot.edit_message_text(
+            chat_id=chat_id,
+            message_id=msg_id,
+            text=updated_text
+        )
 
-        elif original.photo:
-            await userbot.send_photo(
-                Y_GROUP_ID,
-                original.photo.file_id,
-                caption=final_text
-            )
-
-        elif original.document:
-            await userbot.send_document(
-                Y_GROUP_ID,
-                original.document.file_id,
-                caption=final_text
-            )
-
-        elif original.video:
-            await userbot.send_video(
-                Y_GROUP_ID,
-                original.video.file_id,
-                caption=final_text
-            )
-
-        elif original.audio:
-            await userbot.send_audio(
-                Y_GROUP_ID,
-                original.audio.file_id,
-                caption=final_text
-            )
-
-        log.info("Final message sent to Y group")
+        log.info("Y chat message edited successfully")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
