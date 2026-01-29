@@ -3,11 +3,8 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from logger import get_logger
-from config import (
-    API_ID, API_HASH, SESSION_STRING,
-    X_BOT_USERNAME
-)
-from shared_store import PENDING
+from config import API_ID, API_HASH, SESSION_STRING, X_BOT_USERNAME
+from shared_store import TASKS
 
 log = get_logger("USERBOT")
 
@@ -21,61 +18,59 @@ userbot = Client(
 URL_REGEX = re.compile(r"https?://\S+")
 SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.IGNORECASE)
 
-# -------- send softurl to X bot --------
+# ---------- send to X bot ----------
 async def process_softurl(link):
     try:
         await userbot.send_message(X_BOT_USERNAME, link)
-        log.info(f"Softurl sent to X bot: {link}")
-    except Exception:
-        log.exception("process_softurl failed")
+        log.info(f"Sent to X bot: {link}")
+    except Exception as e:
+        TASKS[link]["state"] = "error"
+        TASKS[link]["error"] = str(e)
 
-# -------- X BOT REPLY --------
+# ---------- X BOT REPLY ----------
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
 async def xbot_reply(_, message):
     try:
         if not message.text:
             return
 
-        softurl_match = SOFTURL_REGEX.search(message.text)
-        if not softurl_match:
+        soft_match = SOFTURL_REGEX.search(message.text)
+        if not soft_match:
             return
 
-        softurl = softurl_match.group()
-
-        if softurl not in PENDING:
+        softurl = soft_match.group()
+        if softurl not in TASKS:
             return
 
         links = URL_REGEX.findall(message.text)
         if len(links) < 2:
-            return
+            raise ValueError("Second link not found")
 
         new_link = [l for l in links if l != softurl][0]
 
-        chat_id, msg_id = PENDING.pop(softurl)
+        task = TASKS[softurl]
 
-        # 🔹 get current message text
-        target = await userbot.get_messages(chat_id, msg_id)
+        target = await userbot.get_messages(task["y_chat"], task["y_msg"])
         current_text = target.text or target.caption
-
         updated_text = current_text.replace(softurl, new_link)
 
-        # 🔹 edit SAME message in Y chat
         await userbot.edit_message_text(
-            chat_id=chat_id,
-            message_id=msg_id,
+            chat_id=task["y_chat"],
+            message_id=task["y_msg"],
             text=updated_text
         )
 
-        log.info("Y chat message edited successfully")
+        task["state"] = "done"
+
+        log.info("Task completed")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
-    except Exception:
+    except Exception as e:
         log.exception("xbot_reply error")
+        if softurl in TASKS:
+            TASKS[softurl]["state"] = "error"
+            TASKS[softurl]["error"] = str(e)
 
-# -------- START USERBOT --------
-try:
-    log.info("Userbot started")
-    userbot.start()
-except Exception as e:
-    log.critical(f"Userbot crashed: {e}")
+# ---------- START ----------
+userbot.start()
