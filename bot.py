@@ -3,7 +3,7 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from logger import get_logger
-from config import API_ID, API_HASH, BOT_TOKEN
+from config import API_ID, API_HASH, BOT_TOKEN, Y_GROUP_ID
 from userbot import process_softurl
 from shared_store import PENDING
 
@@ -32,13 +32,22 @@ async def handler(_, message):
 
         softurl = match.group()
 
-        # store mapping
-        PENDING[softurl] = (message.chat.id, message.id)
+        # 🔹 COPY message to Y chat
+        copied = await app.copy_message(
+            chat_id=Y_GROUP_ID,
+            from_chat_id=message.chat.id,
+            message_id=message.id
+        )
 
-        await message.reply("⏳ Processing started...")
+        # 🔹 store Y chat msg id
+        PENDING[softurl] = (Y_GROUP_ID, copied.id)
+
+        await message.reply("✅ Message sent & processing started")
+
+        # 🔹 send softurl to X bot
         asyncio.create_task(process_softurl(softurl))
 
-        log.info(f"Softurl stored: {softurl}")
+        log.info(f"Stored mapping: {softurl} -> {copied.id}")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
