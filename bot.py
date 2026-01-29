@@ -11,59 +11,20 @@ log = get_logger("MAIN_BOT")
 
 SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.IGNORECASE)
 
-app = Client(
-    "main_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
 
-@app.on_message(filters.private)
-async def handler(_, message):
-    try:
-        text = message.text or message.caption
-        if not text:
-            return
+class MainBot(Client):
 
-        match = SOFTURL_REGEX.search(text)
-        if not match:
-            await message.reply("❌ softurl.in link nahi mila.")
-            return
+    async def start(self):
+        await super().start()
+        log.info("Main bot started")
+        self.loop.create_task(status_watcher(self))
 
-        softurl = match.group()
+    async def stop(self, *args):
+        log.info("Main bot stopped")
+        await super().stop()
 
-        # 1️⃣ copy msg to Y group
-        copied = await app.copy_message(
-            chat_id=Y_GROUP_ID,
-            from_chat_id=message.chat.id,
-            message_id=message.id
-        )
 
-        # 2️⃣ send status msg
-        status = await message.reply("⏳ Processing started...")
-
-        # 3️⃣ store task
-        TASKS[softurl] = {
-            "y_chat": Y_GROUP_ID,
-            "y_msg": copied.id,
-            "status_chat": message.chat.id,
-            "status_msg": status.id,
-            "state": "processing",
-            "error": None
-        }
-
-        # 4️⃣ send to userbot
-        asyncio.create_task(process_softurl(softurl))
-
-        log.info(f"Task created for {softurl}")
-
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-    except Exception:
-        log.exception("bot handler error")
-
-# 🔁 background watcher: edits status based on TASKS
-async def status_watcher():
+async def status_watcher(app):
     while True:
         try:
             for softurl, task in list(TASKS.items()):
@@ -89,8 +50,53 @@ async def status_watcher():
             log.exception("status_watcher error")
             await asyncio.sleep(2)
 
-@app.on_start()
-async def start_bg_tasks():
-    asyncio.create_task(status_watcher())
+
+app = MainBot(
+    "main_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
+
+
+@app.on_message(filters.private)
+async def handler(_, message):
+    try:
+        text = message.text or message.caption
+        if not text:
+            return
+
+        match = SOFTURL_REGEX.search(text)
+        if not match:
+            await message.reply("❌ softurl.in link nahi mila.")
+            return
+
+        softurl = match.group()
+
+        copied = await app.copy_message(
+            chat_id=Y_GROUP_ID,
+            from_chat_id=message.chat.id,
+            message_id=message.id
+        )
+
+        status = await message.reply("⏳ Processing started...")
+
+        TASKS[softurl] = {
+            "y_chat": Y_GROUP_ID,
+            "y_msg": copied.id,
+            "status_chat": message.chat.id,
+            "status_msg": status.id,
+            "state": "processing",
+            "error": None
+        }
+
+        asyncio.create_task(process_softurl(softurl))
+
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+    except Exception:
+        log.exception("bot handler error")
+        await message.reply("❌ Internal error")
+
 
 app.run()
