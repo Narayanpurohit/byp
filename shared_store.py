@@ -1,2 +1,2 @@
-# softurl -> (chat_id, msg_id)
-PENDING = {}
+# softurl -> full task data
+TASKS = {}
