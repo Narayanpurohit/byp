@@ -5,5 +5,5 @@ BOT_TOKEN = "7481801715:AAElYLgvaJ7jm2z-Dyqy96CHQQN7wqYs_Lc"
 SESSION_STRING = "BQGZqnkAtjrfnfxHu49K_E8IAinKmOFMYr_sIRS-gsmD-fTdpJszgAhXy8tQOS-24BMWDPWVktnp0bQDEMJ8QNx2GJCVg1fUq2TcKQcqu5E8zD-rrH7OqsIeGZzhkwzGtuNEeJV8eZ99WBnyvOV2Wmx_4mBSIKmv3WyD53SMcSW24hcov77a3POZOlgAQQ22QsRvIzL43JlOsucnPC2n1lbQWYUDI5fKzJUgZbP-HGE1wvWCmT5xpCG-b68thWJyCQC1qAFEmRgzSsX0n70gEAli08Rg7WraqThiiSHnZfyjRzS9UCFWfsyVkHr1L-DZ3DRQFoQ_dLDk25J_oO2ezZ4zE_FbRwAAAAFNo2ggAA"
 
 X_BOT_USERNAME = "Nick_Bypass_Bot"     # without @
-Y_GROUP_ID = -1002882060578         # group id where mega link & /status2 goes
+Y_GROUP_ID = -1003871742191         # group id where mega link & /status2 goes
 STATUS_TIMEOUT = 60
