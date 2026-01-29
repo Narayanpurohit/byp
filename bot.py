@@ -4,12 +4,12 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from logger import get_logger
 from config import API_ID, API_HASH, BOT_TOKEN
-from userbot import process_link, check_status
+from userbot import process_softurl
+from shared_store import PENDING
 
 log = get_logger("MAIN_BOT")
 
-# simple URL detector
-URL_REGEX = re.compile(r"https?://", re.IGNORECASE)
+SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.IGNORECASE)
 
 app = Client(
     "main_bot",
@@ -18,41 +18,31 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-@app.on_message(filters.private & filters.text)
-async def main_handler(_, message):
+@app.on_message(filters.private)
+async def handler(_, message):
     try:
-        text = message.text.strip()
-
-        # ---------- /check ----------
-        if text == "/check":
-            await message.reply("🔍 Status check ho raha hai, please wait...")
-            asyncio.create_task(check_status(message.from_user.id))
+        text = message.text or message.caption
+        if not text:
             return
 
-        # ---------- ignore all other commands ----------
-        if text.startswith("/"):
+        match = SOFTURL_REGEX.search(text)
+        if not match:
+            await message.reply("❌ softurl.in link nahi mila.")
             return
 
-        # ---------- only accept messages with link ----------
-        if not URL_REGEX.search(text):
-            await message.reply("❌ Sirf valid link bhejo.")
-            return
+        softurl = match.group()
 
-        # ---------- process user link ----------
-        await message.reply("⏳ Link received, processing start...")
-        asyncio.create_task(process_link(text))
+        # store mapping
+        PENDING[softurl] = (message.chat.id, message.id)
+
+        await message.reply("⏳ Processing started...")
+        asyncio.create_task(process_softurl(softurl))
+
+        log.info(f"Softurl stored: {softurl}")
 
     except FloodWait as e:
-        log.warning(f"FloodWait main_handler {e.value}s")
         await asyncio.sleep(e.value)
-
     except Exception:
-        log.exception("Unhandled error in bot")
-        await message.reply("❌ Internal error, thodi der baad try karo.")
+        log.exception("bot handler error")
 
-# ---------- START BOT ----------
-try:
-    log.info("Main bot started")
-    app.run()
-except Exception as e:
-    log.critical(f"Bot crashed: {e}")
+app.run()
