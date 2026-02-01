@@ -13,7 +13,7 @@ from config import (
     REPLACE_TO
 )
 from shared_store import TASKS, BATCHES
-from shortener import shorten_link
+from shortner import shorten_link
 
 log = get_logger("USERBOT")
 
