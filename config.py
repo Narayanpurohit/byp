@@ -12,4 +12,5 @@ SHORT_URL = True
 
 SHORTNER_DOMAIN = "https://nkurl.online/api"
 SHORTNER_API = "b77023b080e60450e96d57d30efe2b4ac763a53d"
-
+REPLACE_FROM = "https://t.me/MiaFlix/14"
+REPLACE_TO = "https://t.me/+mAdUKj6Jc40yYWVl"
