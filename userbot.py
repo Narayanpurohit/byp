@@ -12,6 +12,8 @@ from config import (
 )
 from shared_store import TASKS
 from shortner import shorten_link
+from config import REPLACE_FROM, REPLACE_TO
+
 
 log = get_logger("USERBOT")
 
@@ -99,6 +101,8 @@ async def xbot_reply(_, message):
 
         new_text = old_text.replace(softurl, final_link)
 
+        # simple fixed replace
+        new_text = new_text.replace(REPLACE_FROM, REPLACE_TO)
         # ---------- EDIT MESSAGE ----------
         if target.text:
             await userbot.edit_message_text(
