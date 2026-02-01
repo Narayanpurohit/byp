@@ -11,7 +11,7 @@ from config import (
     SHORT_URL
 )
 from shared_store import TASKS
-from shortener import shorten_link
+from shortner import shorten_link
 
 log = get_logger("USERBOT")
 
