@@ -7,3 +7,9 @@ SESSION_STRING = "BQGZqnkAtjrfnfxHu49K_E8IAinKmOFMYr_sIRS-gsmD-fTdpJszgAhXy8tQOS
 X_BOT_USERNAME = "Nick_Bypass_Bot"     # without @
 Y_GROUP_ID = -1003871742191         # group id where mega link & /status2 goes
 STATUS_TIMEOUT = 60
+
+SHORT_URL = True
+
+SHORTNER_DOMAIN = "https://nkurl.online/api"
+SHORTNER_API = "b77023b080e60450e96d57d30efe2b4ac763a53d"
+
