@@ -47,7 +47,7 @@ app = MainBot(
 )
 
 # ---------- SINGLE MESSAGE ----------
-@app.on_message(filters.private & filters.text)
+@app.on_message(filters.private & filters.text & ~filters.command(["batch"]))
 async def single_handler(_, message):
     try:
         if message.text.startswith("/"):
