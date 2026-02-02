@@ -22,7 +22,11 @@ class MainBot(Client):
     async def status_watcher(self):
         while True:
             try:
-                for batch_id, batch in list(BATCHES.items()):
+                for batch_id in list(BATCHES.keys()):
+                    batch = BATCHES.get(batch_id)
+                    if not batch:
+                        continue
+
                     if not batch["pending"]:
                         await self.edit_message_text(
                             batch["status_chat"],
@@ -34,7 +38,9 @@ class MainBot(Client):
                             f"Errors: {batch['errors']}"
                         )
                         BATCHES.pop(batch_id, None)
+
                 await asyncio.sleep(1)
+
             except Exception:
                 log.exception("status_watcher error")
                 await asyncio.sleep(2)
@@ -109,6 +115,8 @@ async def batch_handler(_, message):
             "status_msg": status.id
         }
 
+        batch = BATCHES.get(batch_id)
+
         for msg_id in range(first_id, last_id + 1):
             try:
                 msg = await app.get_messages(chat, msg_id)
@@ -135,23 +143,27 @@ async def batch_handler(_, message):
                     "batch_id": batch_id
                 }
 
-                BATCHES[batch_id]["pending"].add(task_id)
-                BATCHES[batch_id]["total"] += 1
-                BATCHES[batch_id]["forwarded"] += 1
+                if batch:
+                    batch["pending"].add(task_id)
+                    batch["total"] += 1
+                    batch["forwarded"] += 1
 
                 asyncio.create_task(process_softurl(task_id, softurl))
 
             except Exception:
-                BATCHES[batch_id]["errors"] += 1
+                batch = BATCHES.get(batch_id)
+                if batch:
+                    batch["errors"] += 1
 
-        await app.edit_message_text(
-            message.chat.id,
-            status.id,
-            f"📦 Batch Processing\n\n"
-            f"Total: {BATCHES[batch_id]['total']}\n"
-            f"Forwarded: {BATCHES[batch_id]['forwarded']}\n"
-            f"Edited: 0\nErrors: {BATCHES[batch_id]['errors']}"
-        )
+        if batch:
+            await app.edit_message_text(
+                message.chat.id,
+                status.id,
+                f"📦 Batch Processing\n\n"
+                f"Total: {batch['total']}\n"
+                f"Forwarded: {batch['forwarded']}\n"
+                f"Edited: 0\nErrors: {batch['errors']}"
+            )
 
     except Exception:
         log.exception("batch_handler error")
