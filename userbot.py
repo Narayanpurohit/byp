@@ -57,10 +57,13 @@ async def xbot_reply(_, message):
 
         A_link = [l for l in links if l != softurl][0]
 
-        task = TASKS[task_id]
-        msg = await userbot.get_messages(task["y_chat"], task["y_msg"])
+        task = TASKS.get(task_id)
+        if not task:
+            return
 
+        msg = await userbot.get_messages(task["y_chat"], task["y_msg"])
         text = msg.text or msg.caption
+
         text = text.replace(softurl, A_link)
         text = text.replace(REPLACE_FROM, REPLACE_TO)
 
@@ -69,8 +72,8 @@ async def xbot_reply(_, message):
         else:
             await userbot.edit_message_caption(task["y_chat"], task["y_msg"], text)
 
-        # ---------- STATUS UPDATE ----------
-        if "status_chat" in task:
+        # single message status update
+        if task.get("status_chat"):
             await userbot.edit_message_text(
                 task["status_chat"],
                 task["status_msg"],
@@ -78,9 +81,11 @@ async def xbot_reply(_, message):
             )
 
         batch_id = task.get("batch_id")
-        if batch_id and batch_id in BATCHES:
-            BATCHES[batch_id]["edited"] += 1
-            BATCHES[batch_id]["pending"].discard(task_id)
+        if batch_id:
+            batch = BATCHES.get(batch_id)
+            if batch:
+                batch["edited"] += 1
+                batch["pending"].discard(task_id)
 
         TASKS.pop(task_id, None)
 
@@ -89,11 +94,13 @@ async def xbot_reply(_, message):
 
     except Exception:
         log.exception("xbot_reply error")
-        if task_id and task_id in TASKS:
-            batch_id = TASKS[task_id].get("batch_id")
-            if batch_id and batch_id in BATCHES:
-                BATCHES[batch_id]["errors"] += 1
-                BATCHES[batch_id]["pending"].discard(task_id)
-            TASKS.pop(task_id, None)
+        if task_id:
+            task = TASKS.pop(task_id, None)
+            if task:
+                batch_id = task.get("batch_id")
+                batch = BATCHES.get(batch_id)
+                if batch:
+                    batch["errors"] += 1
+                    batch["pending"].discard(task_id)
 
 userbot.start()
