@@ -4,10 +4,16 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from logger import get_logger
 from config import (
-    API_ID, API_HASH, SESSION_STRING,
-    X_BOT_USERNAME, REPLACE_FROM, REPLACE_TO
+    API_ID,
+    API_HASH,
+    SESSION_STRING,
+    X_BOT_USERNAME,
+    REPLACE_FROM,
+    REPLACE_TO,
+    SHORT_URL
 )
 from shared_store import TASKS, BATCHES
+from shortner import shorten_link
 
 log = get_logger("USERBOT")
 
@@ -21,15 +27,15 @@ userbot = Client(
     session_string=SESSION_STRING
 )
 
-# ---------- SEND TO X BOT ----------
-async def process_softurl(task_id, softurl):
+# ---------- SEND SOFTURL TO X BOT ----------
+async def process_softurl(task_id: str, softurl: str):
     try:
         await userbot.send_message(X_BOT_USERNAME, softurl)
     except Exception:
         log.exception("process_softurl failed")
         TASKS.pop(task_id, None)
 
-# ---------- X BOT REPLY ----------
+# ---------- HANDLE X BOT REPLY ----------
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
 async def xbot_reply(_, message):
     task_id = None
@@ -43,8 +49,9 @@ async def xbot_reply(_, message):
 
         softurl = soft_match.group()
 
+        # find related task
         for tid, data in TASKS.items():
-            if data["softurl"] == softurl:
+            if data.get("softurl") == softurl:
                 task_id = tid
                 break
 
@@ -56,15 +63,25 @@ async def xbot_reply(_, message):
             raise ValueError("Second link not found")
 
         A_link = [l for l in links if l != softurl][0]
+        final_link = A_link
+
+        # ---------- SHORT URL ----------
+        if SHORT_URL:
+            try:
+                final_link = await shorten_link(A_link)
+            except Exception:
+                log.warning("Shortener failed, using original link")
+                final_link = A_link
 
         task = TASKS.get(task_id)
         if not task:
             return
 
         msg = await userbot.get_messages(task["y_chat"], task["y_msg"])
-        text = msg.text or msg.caption
+        text = msg.text or msg.caption or ""
 
-        text = text.replace(softurl, A_link)
+        # ---------- REPLACE ----------
+        text = text.replace(softurl, final_link)
         text = text.replace(REPLACE_FROM, REPLACE_TO)
 
         if msg.text:
@@ -72,7 +89,7 @@ async def xbot_reply(_, message):
         else:
             await userbot.edit_message_caption(task["y_chat"], task["y_msg"], text)
 
-        # single message status update
+        # ---------- SINGLE STATUS UPDATE ----------
         if task.get("status_chat"):
             await userbot.edit_message_text(
                 task["status_chat"],
@@ -80,6 +97,7 @@ async def xbot_reply(_, message):
                 "✅ Processing completed"
             )
 
+        # ---------- BATCH UPDATE ----------
         batch_id = task.get("batch_id")
         if batch_id:
             batch = BATCHES.get(batch_id)
@@ -103,4 +121,9 @@ async def xbot_reply(_, message):
                     batch["errors"] += 1
                     batch["pending"].discard(task_id)
 
-userbot.start()
+# ---------- START USERBOT ----------
+try:
+    log.info("Userbot started")
+    userbot.start()
+except Exception as e:
+    log.critical(f"Userbot crashed: {e}")
