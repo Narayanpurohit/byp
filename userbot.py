@@ -17,9 +17,11 @@ from shortner import shorten_link
 
 log = get_logger("USERBOT")
 
-URL_REGEX = re.compile(r"https?://\S+")
+# ---------- REGEX ----------
+URL_REGEX = re.compile(r"https?://\S+", re.IGNORECASE)
 SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.IGNORECASE)
 
+# ---------- CLIENT ----------
 userbot = Client(
     "userbot",
     api_id=API_ID,
@@ -27,9 +29,27 @@ userbot = Client(
     session_string=SESSION_STRING
 )
 
-# ---------- SEND TO X BOT ----------
-async def process_softurl(softurl):
-    await userbot.send_message(X_BOT_USERNAME, softurl)
+# ---------- SEND SOFTURL TO X BOT ----------
+async def process_softurl(softurl: str):
+    try:
+        await userbot.send_message(X_BOT_USERNAME, softurl)
+        log.info(f"Sent to X bot: {softurl}")
+
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await process_softurl(softurl)
+
+    except Exception as e:
+        log.exception("process_softurl failed")
+        task = TASKS.get(softurl)
+        if task:
+            batch_id = task.get("batch_id")
+            if batch_id:
+                batch = BATCHES.get(batch_id)
+                if batch:
+                    batch["errors"] += 1
+                    batch["pending"].discard(softurl)
+            TASKS.pop(softurl, None)
 
 # ---------- HANDLE X BOT REPLY ----------
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
@@ -39,57 +59,82 @@ async def xbot_reply(_, message):
         if not message.text:
             return
 
+        # detect softurl
         soft_match = SOFTURL_REGEX.search(message.text)
         if not soft_match:
             return
 
         softurl = soft_match.group()
-        if softurl not in TASKS:
+        task = TASKS.get(softurl)
+        if not task:
             return
 
+        # extract links
         links = URL_REGEX.findall(message.text)
         if len(links) < 2:
             raise ValueError("Second link not found")
 
-        A_link = [l for l in links if l != softurl][0]
+        A_link = next(l for l in links if l != softurl)
         final_link = A_link
 
+        # ---------- OPTIONAL SHORTENER ----------
         if SHORT_URL:
             try:
                 final_link = await shorten_link(A_link)
-            except Exception:
+            except Exception as e:
+                log.warning(f"Shortener failed, using original link: {e}")
                 final_link = A_link
 
-        task = TASKS[softurl]
-
+        # ---------- FETCH Y MESSAGE ----------
         msg = await userbot.get_messages(task["y_chat"], task["y_msg"])
         text = msg.text or msg.caption
+        if not text:
+            raise ValueError("Target message has no editable text")
 
+        # ---------- REPLACE LOGIC ----------
         text = text.replace(softurl, final_link)
         text = text.replace(REPLACE_FROM, REPLACE_TO)
 
+        # ---------- EDIT ----------
         if msg.text:
-            await userbot.edit_message_text(task["y_chat"], task["y_msg"], text)
+            await userbot.edit_message_text(
+                task["y_chat"], task["y_msg"], text
+            )
         else:
-            await userbot.edit_message_caption(task["y_chat"], task["y_msg"], text)
+            await userbot.edit_message_caption(
+                task["y_chat"], task["y_msg"], text
+            )
 
+        # ---------- UPDATE BATCH ----------
         batch_id = task.get("batch_id")
-        if batch_id and batch_id in BATCHES:
-            BATCHES[batch_id]["edited"] += 1
-            BATCHES[batch_id]["pending"].discard(softurl)
+        if batch_id:
+            batch = BATCHES.get(batch_id)
+            if batch:
+                batch["edited"] += 1
+                batch["pending"].discard(softurl)
 
         TASKS.pop(softurl, None)
+        log.info(f"Task completed: {softurl}")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
 
     except Exception as e:
         log.exception("xbot_reply error")
-        if softurl in TASKS:
-            batch_id = TASKS[softurl].get("batch_id")
-            if batch_id and batch_id in BATCHES:
-                BATCHES[batch_id]["errors"] += 1
-                BATCHES[batch_id]["pending"].discard(softurl)
+
+        task = TASKS.get(softurl)
+        if task:
+            batch_id = task.get("batch_id")
+            if batch_id:
+                batch = BATCHES.get(batch_id)
+                if batch:
+                    batch["errors"] += 1
+                    batch["pending"].discard(softurl)
             TASKS.pop(softurl, None)
 
-userbot.start()
+# ---------- START USERBOT ----------
+try:
+    log.info("Userbot started")
+    userbot.start()
+except Exception as e:
+    log.critical(f"Userbot crashed: {e}")
