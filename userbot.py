@@ -11,7 +11,7 @@ from config import (
     B_BOT_USERNAME,
     SHORT_URL
 )
-from shared_store import TASKS
+from shared_store import TASKS, BATCHES
 from shortner import shorten_link
 
 log = get_logger("USERBOT")
@@ -26,11 +26,40 @@ userbot = Client(
     session_string=SESSION_STRING
 )
 
-# ---------------- SEND SOFTURL TO X BOT ----------------
-async def process_softurl(softurl):
-    await userbot.send_message(X_BOT_USERNAME, softurl)
+# ======================================================
+# ADD TASK (🔥 THIS WAS MISSING)
+# ======================================================
+async def add_task(softurl, y_msg_id):
+    """
+    Entry point called by main bot
+    """
+    try:
+        task = TASKS.get(softurl)
+        if not task:
+            return
 
-# ---------------- X BOT REPLY ----------------
+        # batch counter
+        batch_id = task.get("batch_id")
+        if batch_id and batch_id in BATCHES:
+            BATCHES[batch_id]["a_done"] += 1
+
+        # send softurl to X bot
+        await userbot.send_message(X_BOT_USERNAME, softurl)
+
+        task["state"] = "sent_to_x"
+        log.info(f"Task started for {softurl}")
+
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+    except Exception:
+        log.exception("add_task failed")
+        if batch_id and batch_id in BATCHES:
+            BATCHES[batch_id]["errors"] += 1
+
+
+# ======================================================
+# X BOT REPLY
+# ======================================================
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
 async def xbot_reply(_, message):
     try:
@@ -46,6 +75,9 @@ async def xbot_reply(_, message):
             return
 
         links = URL_REGEX.findall(message.text)
+        if len(links) < 2:
+            return
+
         A_link = [l for l in links if l != softurl][0]
 
         TASKS[softurl]["A_link"] = A_link
@@ -56,7 +88,10 @@ async def xbot_reply(_, message):
     except Exception:
         log.exception("xbot_reply error")
 
-# ---------------- SEND A LINK TO B BOT ----------------
+
+# ======================================================
+# SEND A LINK TO B BOT (reply based)
+# ======================================================
 async def send_A_to_B(A_link, softurl):
     try:
         link_msg = await userbot.send_message(
@@ -74,8 +109,13 @@ async def send_A_to_B(A_link, softurl):
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
+    except Exception:
+        log.exception("send_A_to_B failed")
 
-# ---------------- B BOT REPLY ----------------
+
+# ======================================================
+# B BOT REPLY
+# ======================================================
 @userbot.on_message(filters.chat(B_BOT_USERNAME))
 async def bbot_reply(_, message):
     try:
@@ -101,18 +141,26 @@ async def bbot_reply(_, message):
 
             await edit_y_message(softurl, final_link)
             TASKS.pop(softurl, None)
+
+            batch_id = task.get("batch_id")
+            if batch_id and batch_id in BATCHES:
+                BATCHES[batch_id]["queue_done"] += 1
+
             break
 
     except Exception:
         log.exception("bbot_reply error")
 
-# ---------------- EDIT Y MESSAGE ----------------
+
+# ======================================================
+# EDIT Y MESSAGE
+# ======================================================
 async def edit_y_message(softurl, final_link):
     task = TASKS[softurl]
 
     msg = await userbot.get_messages(
         task["y_chat"],
-        task["y_msg"]
+        task["y_msg_id"]
     )
 
     text = msg.text or msg.caption
@@ -122,23 +170,23 @@ async def edit_y_message(softurl, final_link):
         if msg.text:
             await userbot.edit_message_text(
                 task["y_chat"],
-                task["y_msg"],
+                task["y_msg_id"],
                 new_text
             )
         else:
             await userbot.edit_message_caption(
                 task["y_chat"],
-                task["y_msg"],
+                task["y_msg_id"],
                 new_text
             )
     except MessageNotModified:
         pass
 
-    # update status only if changed
     await userbot.edit_message_text(
         task["status_chat"],
         task["status_msg"],
         "✅ Processing completed"
     )
+
 
 userbot.start()
