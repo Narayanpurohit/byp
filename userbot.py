@@ -99,13 +99,10 @@ async def send_A_to_B(A_link, softurl):
             A_link
         )
 
-        await userbot.send_message(
-            B_BOT_USERNAME,
-            "/genlink",
-            reply_to_message_id=link_msg.id
-        )
+        await link_msg.reply("/genlink")
 
         TASKS[softurl]["state"] = "sent_to_b"
+        log.info("A link sent and /genlink replied properly")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
