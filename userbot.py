@@ -1,25 +1,26 @@
 import re
 import asyncio
+from collections import deque
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
-from logger import get_logger
 from config import (
     API_ID,
     API_HASH,
     SESSION_STRING,
     X_BOT_USERNAME,
-    REPLACE_FROM,
-    REPLACE_TO,
-    SHORT_URL
+    B_BOT_USERNAME,
+    Y_GROUP_ID,
 )
-from shared_store import TASKS, BATCHES
 from shortner import shorten_link
+from logger import get_logger
 
 log = get_logger("USERBOT")
 
+# ---------- REGEX ----------
+SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.I)
 URL_REGEX = re.compile(r"https?://\S+")
-SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.IGNORECASE)
 
+# ---------- CLIENT ----------
 userbot = Client(
     "userbot",
     api_id=API_ID,
@@ -27,103 +28,140 @@ userbot = Client(
     session_string=SESSION_STRING
 )
 
-# ---------- SEND SOFTURL TO X BOT ----------
-async def process_softurl(task_id: str, softurl: str):
+# ---------- MEMORY ----------
+TASKS = {}          # softurl -> task
+QUEUE = deque()     # task_ids in order
+QUEUE_RUNNING = False
+
+
+# ---------- TASK STRUCT ----------
+def new_task(softurl, y_msg_id):
+    return {
+        "softurl": softurl,
+        "A_link": None,
+        "final_link": None,
+        "y_msg_id": y_msg_id,
+        "state": "waiting_for_A"   # waiting_for_A → ready → done
+    }
+
+
+# =========================================================
+# PHASE 1 — PARALLEL (X BOT)
+# =========================================================
+async def send_to_xbot(softurl: str):
     try:
         await userbot.send_message(X_BOT_USERNAME, softurl)
-    except Exception:
-        log.exception("process_softurl failed")
-        TASKS.pop(task_id, None)
-
-# ---------- HANDLE X BOT REPLY ----------
-@userbot.on_message(filters.chat(X_BOT_USERNAME))
-async def xbot_reply(_, message):
-    task_id = None
-    try:
-        if not message.text:
-            return
-
-        soft_match = SOFTURL_REGEX.search(message.text)
-        if not soft_match:
-            return
-
-        softurl = soft_match.group()
-
-        # find related task
-        for tid, data in TASKS.items():
-            if data.get("softurl") == softurl:
-                task_id = tid
-                break
-
-        if not task_id:
-            return
-
-        links = URL_REGEX.findall(message.text)
-        if len(links) < 2:
-            raise ValueError("Second link not found")
-
-        A_link = [l for l in links if l != softurl][0]
-        final_link = A_link
-
-        # ---------- SHORT URL ----------
-        if SHORT_URL:
-            try:
-                final_link = await shorten_link(A_link)
-            except Exception:
-                log.warning("Shortener failed, using original link")
-                final_link = A_link
-
-        task = TASKS.get(task_id)
-        if not task:
-            return
-
-        msg = await userbot.get_messages(task["y_chat"], task["y_msg"])
-        text = msg.text or msg.caption or ""
-
-        # ---------- REPLACE ----------
-        text = text.replace(softurl, final_link)
-        text = text.replace(REPLACE_FROM, REPLACE_TO)
-
-        if msg.text:
-            await userbot.edit_message_text(task["y_chat"], task["y_msg"], text)
-        else:
-            await userbot.edit_message_caption(task["y_chat"], task["y_msg"], text)
-
-        # ---------- SINGLE STATUS UPDATE ----------
-        if task.get("status_chat"):
-            await userbot.edit_message_text(
-                task["status_chat"],
-                task["status_msg"],
-                "✅ Processing completed"
-            )
-
-        # ---------- BATCH UPDATE ----------
-        batch_id = task.get("batch_id")
-        if batch_id:
-            batch = BATCHES.get(batch_id)
-            if batch:
-                batch["edited"] += 1
-                batch["pending"].discard(task_id)
-
-        TASKS.pop(task_id, None)
-
+        log.info(f"Sent to X bot: {softurl}")
     except FloodWait as e:
         await asyncio.sleep(e.value)
+        await send_to_xbot(softurl)
 
-    except Exception:
-        log.exception("xbot_reply error")
-        if task_id:
-            task = TASKS.pop(task_id, None)
-            if task:
-                batch_id = task.get("batch_id")
-                batch = BATCHES.get(batch_id)
-                if batch:
-                    batch["errors"] += 1
-                    batch["pending"].discard(task_id)
 
-# ---------- START USERBOT ----------
-try:
-    log.info("Userbot started")
-    userbot.start()
-except Exception as e:
-    log.critical(f"Userbot crashed: {e}")
+@userbot.on_message(filters.chat(X_BOT_USERNAME))
+async def xbot_reply(_, message):
+    if not message.text:
+        return
+
+    soft_match = SOFTURL_REGEX.search(message.text)
+    if not soft_match:
+        return
+
+    softurl = soft_match.group()
+    if softurl not in TASKS:
+        return
+
+    links = URL_REGEX.findall(message.text)
+    A_link = next((l for l in links if l != softurl), None)
+    if not A_link:
+        return
+
+    TASKS[softurl]["A_link"] = A_link
+    TASKS[softurl]["state"] = "ready"
+
+    log.info(f"A link stored for {softurl}")
+
+    # check if ALL tasks are ready
+    if all(t["state"] == "ready" for t in TASKS.values()):
+        asyncio.create_task(start_queue())
+
+
+# =========================================================
+# PHASE 2 — QUEUE (B BOT + EDIT)
+# =========================================================
+async def start_queue():
+    global QUEUE_RUNNING
+    if QUEUE_RUNNING:
+        return
+
+    QUEUE_RUNNING = True
+    log.info("Queue started")
+
+    while QUEUE:
+        softurl = QUEUE.popleft()
+        task = TASKS.get(softurl)
+        if not task:
+            continue
+
+        try:
+            # ---- send A link to B bot
+            await userbot.send_message(B_BOT_USERNAME, task["A_link"])
+            await userbot.send_message(B_BOT_USERNAME, "/genlink")
+
+            # wait for B bot reply
+            final = await wait_bbot_reply()
+            short = await shorten_link(final)
+
+            # edit Y message
+            msg = await userbot.get_messages(Y_GROUP_ID, task["y_msg_id"])
+            text = msg.text or msg.caption
+            new_text = text.replace(task["softurl"], short)
+
+            if msg.text:
+                await userbot.edit_message_text(Y_GROUP_ID, msg.id, new_text)
+            else:
+                await userbot.edit_message_caption(Y_GROUP_ID, msg.id, new_text)
+
+            task["state"] = "done"
+            log.info(f"Completed: {softurl}")
+
+        except Exception:
+            log.exception("Queue task failed")
+
+    QUEUE_RUNNING = False
+    TASKS.clear()
+    log.info("Queue finished")
+
+
+# ---------- wait B bot reply ----------
+async def wait_bbot_reply(timeout=60):
+    fut = asyncio.get_event_loop().create_future()
+
+    @userbot.on_message(filters.chat(B_BOT_USERNAME))
+    async def _bbot(_, msg):
+        if msg.text:
+            link = URL_REGEX.search(msg.text)
+            if link and not fut.done():
+                fut.set_result(link.group())
+
+    return await asyncio.wait_for(fut, timeout)
+
+
+# =========================================================
+# ENTRY POINT (called by main bot)
+# =========================================================
+async def add_task(softurl: str, y_msg_id: int):
+    if softurl in TASKS:
+        return
+
+    TASKS[softurl] = new_task(softurl, y_msg_id)
+    QUEUE.append(softurl)
+
+    # Phase-1 parallel trigger
+    asyncio.create_task(send_to_xbot(softurl))
+
+
+# =========================================================
+# START
+# =========================================================
+userbot.start()
+log.info("Userbot started")
