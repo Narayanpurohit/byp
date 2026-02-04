@@ -1,170 +1,80 @@
+import json
 import re
-import asyncio
 from pyrogram import Client, filters
-from pyrogram.errors import FloodWait, MessageNotModified
-from logger import get_logger
-from config import (
-    API_ID,
-    API_HASH,
-    SESSION_STRING,
-    X_BOT_USERNAME,
-    B_BOT_USERNAME,
-    SHORT_URL
-)
-from shared_store import TASKS, BATCHES
+from config import *
 from shortner import shorten_link
 
-log = get_logger("USERBOT")
-
-SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.I)
-URL_REGEX = re.compile(r"https?://\S+")
-
-userbot = Client(
+user = Client(
     "userbot",
     api_id=API_ID,
     api_hash=API_HASH,
     session_string=SESSION_STRING
 )
 
+# ---------- JSON helpers ----------
+def load_tasks():
+    with open("tasks.json", "r") as f:
+        return json.load(f)
 
-# ======================================================
-# QUEUE LOOP (ONE TASK AT A TIME)
-# ======================================================
-async def queue_worker():
-    log.info("🚀 Queue worker started")
+def save_tasks(data):
+    with open("tasks.json", "w") as f:
+        json.dump(data, f, indent=2)
 
-    while True:
-        try:
-            for softurl, task in list(TASKS.items()):
-                if task.get("state") != "pending":
-                    continue
+# ---------- SEND C LINKS TO X BOT ----------
+async def send_c_links():
+    tasks = load_tasks()
+    for c_link, data in tasks.items():
+        if not data["A"]:
+            await user.send_message(X_BOT_USERNAME, c_link)
 
-                log.info(f"▶ Processing: {softurl}")
-                task["state"] = "sent_to_x"
+# ---------- X BOT REPLY HANDLER (C → A) ----------
+@user.on_message(filters.chat(X_BOT_USERNAME) & filters.reply)
+async def xbot_reply_handler(_, msg):
+    text = msg.text or ""
+    reply_text = msg.reply_to_message.text or ""
 
-                await userbot.send_message(X_BOT_USERNAME, softurl)
-                await wait_for_completion(softurl)
-                break
+    msg_links = re.findall(r"https?://\S+", text)
+    reply_links = re.findall(r"https?://\S+", reply_text)
 
-            await asyncio.sleep(1)
-
-        except Exception:
-            log.exception("queue_worker error")
-            await asyncio.sleep(2)
-
-
-# ======================================================
-# WAIT UNTIL TASK FINISHES
-# ======================================================
-async def wait_for_completion(softurl):
-    while softurl in TASKS:
-        await asyncio.sleep(1)
-
-
-# ======================================================
-# X BOT REPLY → A LINK
-# ======================================================
-@userbot.on_message(filters.chat(X_BOT_USERNAME))
-async def xbot_reply(_, message):
-    try:
-        if not message.text:
-            return
-
-        soft_match = SOFTURL_REGEX.search(message.text)
-        if not soft_match:
-            return
-
-        softurl = soft_match.group()
-        task = TASKS.get(softurl)
-        if not task:
-            return
-
-        links = URL_REGEX.findall(message.text)
-        A_link = [l for l in links if l != softurl][0]
-
-        task["A_link"] = A_link
-        task["state"] = "got_A"
-
-        batch_id = task.get("batch_id")
-        if batch_id in BATCHES:
-            BATCHES[batch_id]["a_done"] += 1
-
-        msg = await userbot.send_message(B_BOT_USERNAME, A_link)
-        await msg.reply("/genlink")
-
-        task["state"] = "sent_to_b"
-
-    except Exception:
-        log.exception("xbot_reply error")
-
-
-# ======================================================
-# B BOT REPLY → FINAL LINK
-# ======================================================
-@userbot.on_message(filters.chat(B_BOT_USERNAME))
-async def bbot_reply(_, message):
-    try:
-        if not message.text:
-            return
-
-        match = URL_REGEX.search(message.text)
-        if not match:
-            return
-
-        new_link = match.group()
-
-        for softurl, task in list(TASKS.items()):
-            if task.get("state") != "sent_to_b":
-                continue
-
-            final_link = new_link
-            if SHORT_URL:
-                final_link = await shorten_link(new_link)
-
-            await edit_y_message(task, softurl, final_link)
-
-            batch_id = task.get("batch_id")
-            if batch_id in BATCHES:
-                BATCHES[batch_id]["queue_done"] += 1
-
-            TASKS.pop(softurl, None)
-            log.info(f"✅ Task done: {softurl}")
-            break
-
-    except Exception:
-        log.exception("bbot_reply error")
-
-
-# ======================================================
-# EDIT Y CHAT MESSAGE
-# ======================================================
-async def edit_y_message(task, softurl, final_link):
-    msg = await userbot.get_messages(
-        task["y_chat"],
-        task["y_msg_id"]
-    )
-
-    text = msg.text or msg.caption
-    if not text:
+    if not msg_links or not reply_links:
         return
 
-    new_text = text.replace(softurl, final_link)
+    c_link = reply_links[0]
+    a_link = msg_links[-1]
 
-    try:
-        if msg.text:
-            await userbot.edit_message_text(task["y_chat"], task["y_msg_id"], new_text)
-        else:
-            await userbot.edit_message_caption(task["y_chat"], task["y_msg_id"], new_text)
-    except MessageNotModified:
-        pass
+    tasks = load_tasks()
+    if c_link in tasks and not tasks[c_link]["A"]:
+        tasks[c_link]["A"] = a_link
+        save_tasks(tasks)
 
+# ---------- B BOT + SHORTENER ----------
+async def process_b_links(bot):
+    tasks = load_tasks()
 
-# ======================================================
-# START
-# ======================================================
-async def main():
-    await userbot.start()
-    asyncio.create_task(queue_worker())
-    await asyncio.Event().wait()
+    for c, data in list(tasks.items()):
+        if not data["A"] or data["B"]:
+            continue
 
-asyncio.run(main())
+        sent = await user.send_message(B_BOT_USERNAME, data["A"])
+        await sent.reply("/genlink")
+
+        async for r in user.get_chat_history(B_BOT_USERNAME, limit=5):
+            if r.text and "http" in r.text:
+                data["B"] = r.text
+                data["short"] = await shorten_link(r.text)
+
+                await bot.edit_message_text(
+                    Y_CHAT_ID,
+                    data["msg_id"],
+                    data["short"]
+                )
+
+                del tasks[c]
+                save_tasks(tasks)
+                break
+
+# ---------- ENTRY POINT (CALLED FROM bot.py) ----------
+async def start_userbot(bot):
+    await user.start()
+    await send_c_links()
+    await process_b_links(bot)
