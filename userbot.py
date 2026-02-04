@@ -1,14 +1,20 @@
 import json
 import re
 import asyncio
+import logging
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from config import *
 from shortner import shorten_link
 
-# -------------------------------------------------
-# USERBOT CLIENT
-# -------------------------------------------------
+# ---------------- LOGGING ----------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | USERBOT | %(levelname)s | %(message)s"
+)
+log = logging.getLogger(__name__)
+
+# ---------------- USERBOT CLIENT ----------------
 user = Client(
     "userbot",
     api_id=API_ID,
@@ -16,14 +22,10 @@ user = Client(
     session_string=SESSION_STRING
 )
 
-# -------------------------------------------------
-# REGEX
-# -------------------------------------------------
+# ---------------- REGEX ----------------
 URL_REGEX = re.compile(r"https?://\S+")
 
-# -------------------------------------------------
-# JSON HELPERS
-# -------------------------------------------------
+# ---------------- JSON HELPERS ----------------
 def load_tasks():
     try:
         with open("tasks.json", "r") as f:
@@ -35,11 +37,9 @@ def save_tasks(data):
     with open("tasks.json", "w") as f:
         json.dump(data, f, indent=2)
 
-# -------------------------------------------------
-# X BOT REPLY HANDLER (C LINK -> A LINK)
-# -------------------------------------------------
+# ---------------- X BOT REPLY HANDLER ----------------
 @user.on_message(filters.chat(X_BOT_USERNAME) & filters.reply)
-async def x_bot_reply_handler(_, message):
+async def xbot_reply_handler(_, message):
     try:
         reply_text = message.reply_to_message.text or ""
         text = message.text or ""
@@ -57,13 +57,12 @@ async def x_bot_reply_handler(_, message):
         if c_link in tasks and not tasks[c_link]["A"]:
             tasks[c_link]["A"] = a_link
             save_tasks(tasks)
+            log.info(f"A-link stored | C={c_link}")
 
     except Exception:
-        pass
+        log.exception("X bot reply handling failed")
 
-# -------------------------------------------------
-# MAIN BATCH WORKER
-# -------------------------------------------------
+# ---------------- MAIN BATCH WORKER ----------------
 async def start_batch_userbot(
     bot,
     chat,
@@ -74,14 +73,14 @@ async def start_batch_userbot(
     batch_id
 ):
     await user.start()
+    log.info(f"Userbot started for batch {batch_id}")
 
     tasks = load_tasks()
     total = last_id - first_id + 1
-
     processed = 0
     errors = 0
 
-    # ---------------- FETCH & COPY MESSAGES ----------------
+    # -------- STEP 1: FETCH + COPY + SEND C LINKS --------
     for msg_id in range(first_id, last_id + 1):
         try:
             msg = await user.get_messages(chat, msg_id)
@@ -112,19 +111,20 @@ async def start_batch_userbot(
                     "short": "",
                     "batch": batch_id
                 }
-
                 await user.send_message(X_BOT_USERNAME, c)
+                log.info(f"C-link sent to X bot | {c}")
 
             processed += 1
 
         except FloodWait as e:
+            log.warning(f"FloodWait {e.value}s")
             await asyncio.sleep(e.value)
         except Exception:
             errors += 1
+            log.exception(f"Message {msg_id} failed")
 
         save_tasks(tasks)
 
-        # status update
         await bot.edit_message_text(
             status_chat,
             status_msg,
@@ -133,12 +133,12 @@ async def start_batch_userbot(
 
 Total messages : {total}
 Processed      : {processed}
-Errors         : {errors}
 A-links found  : {sum(1 for t in tasks.values() if t["A"])}
+Errors         : {errors}
 """
         )
 
-    # ---------------- PROCESS B BOT ----------------
+    # -------- STEP 2: B BOT + SHORTENER --------
     for c_link, data in list(tasks.items()):
         if not data["A"]:
             continue
@@ -146,6 +146,7 @@ A-links found  : {sum(1 for t in tasks.values() if t["A"])}
         try:
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
             await sent.reply("/genlink")
+            log.info(f"A-link sent to B bot | {data['A']}")
 
             async for r in user.get_chat_history(B_BOT_USERNAME, limit=5):
                 if r.text and "http" in r.text:
@@ -160,16 +161,22 @@ A-links found  : {sum(1 for t in tasks.values() if t["A"])}
 
                     del tasks[c_link]
                     save_tasks(tasks)
+
+                    log.info(f"Completed | C={c_link}")
                     break
 
         except FloodWait as e:
+            log.warning(f"FloodWait {e.value}s (B bot)")
             await asyncio.sleep(e.value)
         except Exception:
             errors += 1
+            log.exception(f"B bot failed | {c_link}")
 
-    # ---------------- FINAL STATUS ----------------
+    # -------- FINAL --------
     await bot.edit_message_text(
         status_chat,
         status_msg,
         "✅ **Batch Completed Successfully**"
     )
+
+    log.info(f"Batch completed | id={batch_id}")
