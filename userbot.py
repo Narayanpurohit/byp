@@ -19,6 +19,9 @@ log = get_logger("USERBOT")
 SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.I)
 URL_REGEX = re.compile(r"https?://\S+")
 
+TASK_QUEUE = []        # 🔑 real queue
+CURRENT_TASK = None   # jo abhi process ho raha
+
 userbot = Client(
     "userbot",
     api_id=API_ID,
@@ -30,27 +33,45 @@ userbot = Client(
 # ENTRY POINT (called from main bot)
 # ======================================================
 async def add_task(softurl, y_msg_id):
-    try:
-        task = TASKS.get(softurl)
-        if not task:
-            return
+    task = TASKS.get(softurl)
+    if not task:
+        return
+
+    if softurl not in TASK_QUEUE:
+        TASK_QUEUE.append(softurl)
+        task["state"] = "queued"
+        log.info(f"Queued task: {softurl}")
 
         batch_id = task.get("batch_id")
         if batch_id and batch_id in BATCHES:
             BATCHES[batch_id]["a_done"] += 1
 
-        # send softurl to X bot
-        await userbot.send_message(X_BOT_USERNAME, softurl)
 
-        task["state"] = "sent_to_x"
-        log.info(f"Task started: {softurl}")
+# ======================================================
+# MAIN PROCESS LOOP (SEQUENTIAL WORKER)
+# ======================================================
+async def process_loop():
+    global CURRENT_TASK
 
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-    except Exception:
-        log.exception("add_task failed")
-        if batch_id and batch_id in BATCHES:
-            BATCHES[batch_id]["errors"] += 1
+    while True:
+        try:
+            if CURRENT_TASK is None and TASK_QUEUE:
+                CURRENT_TASK = TASK_QUEUE.pop(0)
+                task = TASKS.get(CURRENT_TASK)
+
+                if not task:
+                    CURRENT_TASK = None
+                    continue
+
+                await userbot.send_message(X_BOT_USERNAME, CURRENT_TASK)
+                task["state"] = "sent_to_x"
+                log.info(f"Sent to X bot: {CURRENT_TASK}")
+
+            await asyncio.sleep(1)
+
+        except Exception:
+            log.exception("process_loop error")
+            await asyncio.sleep(2)
 
 
 # ======================================================
@@ -58,8 +79,10 @@ async def add_task(softurl, y_msg_id):
 # ======================================================
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
 async def xbot_reply(_, message):
+    global CURRENT_TASK
+
     try:
-        if not message.text:
+        if not CURRENT_TASK or not message.text:
             return
 
         soft_match = SOFTURL_REGEX.search(message.text)
@@ -67,7 +90,7 @@ async def xbot_reply(_, message):
             return
 
         softurl = soft_match.group()
-        if softurl not in TASKS:
+        if softurl != CURRENT_TASK:
             return
 
         links = URL_REGEX.findall(message.text)
@@ -79,41 +102,26 @@ async def xbot_reply(_, message):
         TASKS[softurl]["A_link"] = A_link
         TASKS[softurl]["state"] = "got_A"
 
-        await send_A_to_B(A_link, softurl)
+        # send A link to B bot
+        link_msg = await userbot.send_message(B_BOT_USERNAME, A_link)
+        await link_msg.reply("/genlink")
+
+        TASKS[softurl]["state"] = "sent_to_b"
+        log.info("A link sent to B bot")
 
     except Exception:
         log.exception("xbot_reply error")
 
 
 # ======================================================
-# SEND A LINK TO B BOT + reply /genlink
-# ======================================================
-async def send_A_to_B(A_link, softurl):
-    try:
-        link_msg = await userbot.send_message(
-            B_BOT_USERNAME,
-            A_link
-        )
-
-        # IMPORTANT: reply, not normal send
-        await link_msg.reply("/genlink")
-
-        TASKS[softurl]["state"] = "sent_to_b"
-        log.info("A link sent to B bot")
-
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-    except Exception:
-        log.exception("send_A_to_B failed")
-
-
-# ======================================================
-# B BOT REPLY (direct message, NOT reply)
+# B BOT REPLY (DIRECT MESSAGE)
 # ======================================================
 @userbot.on_message(filters.chat(B_BOT_USERNAME))
 async def bbot_reply(_, message):
+    global CURRENT_TASK
+
     try:
-        if not message.text:
+        if not CURRENT_TASK or not message.text:
             return
 
         match = URL_REGEX.search(message.text)
@@ -121,28 +129,24 @@ async def bbot_reply(_, message):
             return
 
         new_link = match.group()
+        final_link = new_link
 
-        # 🔑 queue-style: first task waiting for B bot
-        for softurl, task in list(TASKS.items()):
-            if task.get("state") != "sent_to_b":
-                continue
+        if SHORT_URL:
+            try:
+                final_link = await shorten_link(new_link)
+            except Exception:
+                pass
 
-            final_link = new_link
+        await edit_y_message(CURRENT_TASK, final_link)
 
-            if SHORT_URL:
-                try:
-                    final_link = await shorten_link(new_link)
-                except Exception:
-                    pass
-
-            await edit_y_message(softurl, final_link)
-
+        task = TASKS.get(CURRENT_TASK)
+        if task:
             batch_id = task.get("batch_id")
             if batch_id and batch_id in BATCHES:
                 BATCHES[batch_id]["queue_done"] += 1
 
-            TASKS.pop(softurl, None)
-            break
+        TASKS.pop(CURRENT_TASK, None)
+        CURRENT_TASK = None   # 🔁 allow next task
 
     except Exception:
         log.exception("bbot_reply error")
@@ -181,7 +185,6 @@ async def edit_y_message(softurl, final_link):
     except MessageNotModified:
         pass
 
-    # status message
     try:
         await userbot.edit_message_text(
             task["status_chat"],
@@ -195,4 +198,10 @@ async def edit_y_message(softurl, final_link):
 # ======================================================
 # START USERBOT
 # ======================================================
-userbot.start()
+async def main():
+    await userbot.start()
+    userbot.loop.create_task(process_loop())
+    log.info("Userbot started with sequential queue")
+    await asyncio.Event().wait()
+
+asyncio.run(main())
