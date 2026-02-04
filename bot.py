@@ -1,4 +1,3 @@
-# bot.py
 import re
 import asyncio
 import uuid
@@ -7,17 +6,17 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from logger import get_logger
 from config import API_ID, API_HASH, BOT_TOKEN, Y_GROUP_ID
 from shared_store import TASKS, BATCHES
-from userbot import add_task
 
 log = get_logger("MAIN_BOT")
 
 SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.I)
 
+
 class MainBot(Client):
 
     async def start(self):
         await super().start()
-        log.info("Main bot started (BATCH MODE ONLY)")
+        log.info("✅ Main bot started")
         self.loop.create_task(self.status_watcher())
 
     async def status_watcher(self):
@@ -28,7 +27,7 @@ class MainBot(Client):
                         "📦 Batch Processing\n\n"
                         f"Total: {batch['total']}\n"
                         f"A-links collected: {batch['a_done']}\n"
-                        f"Queued done: {batch['queue_done']}\n"
+                        f"Queue done: {batch['queue_done']}\n"
                         f"Errors: {batch['errors']}"
                     )
 
@@ -44,11 +43,13 @@ class MainBot(Client):
                             pass
 
                     if batch["queue_done"] + batch["errors"] >= batch["total"]:
-                        log.info(f"Batch {batch_id} finished")
+                        log.info(f"✅ Batch {batch_id} completed")
                         BATCHES.pop(batch_id, None)
 
                 await asyncio.sleep(5)
 
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
             except Exception:
                 log.exception("status_watcher error")
                 await asyncio.sleep(5)
@@ -61,15 +62,27 @@ app = MainBot(
     bot_token=BOT_TOKEN
 )
 
+
 # ======================================================
-# BATCH HANDLER (ONLY ENTRY POINT)
+# ADD TASK (QUEUE ENTRY POINT)
+# ======================================================
+async def add_task(softurl):
+    task = TASKS.get(softurl)
+    if not task:
+        return
+    task["state"] = "pending"
+    log.info(f"📌 Task queued: {softurl}")
+
+
+# ======================================================
+# BATCH HANDLER (ONLY MODE)
 # ======================================================
 @app.on_message(filters.private & filters.command("batch"))
 async def batch_handler(_, message):
     try:
         parts = message.text.split()
         if len(parts) != 3:
-            await message.reply("❌ Usage:\n/batch first_msg_link last_msg_link")
+            await message.reply("❌ /batch first_link last_link")
             return
 
         def parse(link):
@@ -82,15 +95,8 @@ async def batch_handler(_, message):
             first_id, last_id = last_id, first_id
 
         batch_id = str(uuid.uuid4())[:8]
-        log.info(f"Batch started: {batch_id}")
 
-        status = await message.reply(
-            "📦 Batch Processing\n\n"
-            "Total: calculating...\n"
-            "A-links collected: 0\n"
-            "Queued done: 0\n"
-            "Errors: 0"
-        )
+        status = await message.reply("📦 Batch starting...")
 
         BATCHES[batch_id] = {
             "total": last_id - first_id + 1,
@@ -117,21 +123,20 @@ async def batch_handler(_, message):
                     continue
 
                 softurl = match.group()
-                log.info(f"Batch {batch_id}: found {softurl}")
 
                 copied = await app.copy_message(Y_GROUP_ID, chat, msg_id)
 
                 TASKS[softurl] = {
                     "y_chat": Y_GROUP_ID,
                     "y_msg_id": copied.id,
-                    "batch_id": batch_id
+                    "batch_id": batch_id,
+                    "state": "new"
                 }
 
-                await add_task(softurl, copied.id)
+                await add_task(softurl)
 
             except Exception:
                 BATCHES[batch_id]["errors"] += 1
-                log.exception("Batch message failed")
 
     except Exception:
         log.exception("batch_handler error")
