@@ -1,8 +1,18 @@
-import asyncio, uuid
+import asyncio
+import logging
+import uuid
 from pyrogram import Client, filters
 from config import *
 from userbot import start_batch_userbot
 
+# ---------------- LOGGING ----------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | BOT | %(levelname)s | %(message)s"
+)
+log = logging.getLogger(__name__)
+
+# ---------------- BOT CLIENT ----------------
 bot = Client(
     "bot",
     api_id=API_ID,
@@ -10,6 +20,7 @@ bot = Client(
     bot_token=BOT_TOKEN
 )
 
+# ---------------- /batch COMMAND ----------------
 @bot.on_message(filters.command("batch"))
 async def batch_handler(_, message):
     try:
@@ -30,12 +41,13 @@ async def batch_handler(_, message):
             first_id, last_id = last_id, first_id
 
         batch_id = str(uuid.uuid4())[:8]
+        log.info(f"Batch started | id={batch_id} | {chat}:{first_id}-{last_id}")
 
         status = await message.reply(
             "📦 **Batch Processing Started**\n\n"
-            "Total: calculating...\n"
-            "A-links collected: 0\n"
+            "Total messages: calculating...\n"
             "Processed: 0\n"
+            "A-links found: 0\n"
             "Errors: 0"
         )
 
@@ -52,6 +64,7 @@ async def batch_handler(_, message):
         )
 
     except Exception as e:
+        log.exception("Batch handler failed")
         await message.reply(f"❌ Error: `{e}`")
 
 bot.run()
