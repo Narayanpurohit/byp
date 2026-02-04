@@ -1,3 +1,4 @@
+# bot.py
 import re
 import asyncio
 import uuid
@@ -12,14 +13,11 @@ log = get_logger("MAIN_BOT")
 
 SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.I)
 
-# ======================================================
-# MAIN BOT CLASS
-# ======================================================
 class MainBot(Client):
 
     async def start(self):
         await super().start()
-        log.info("Main bot started")
+        log.info("Main bot started (BATCH MODE ONLY)")
         self.loop.create_task(self.status_watcher())
 
     async def status_watcher(self):
@@ -42,19 +40,15 @@ class MainBot(Client):
                                 text
                             )
                             batch["last_text"] = text
-                            log.info(f"Batch {batch_id} status updated")
                         except MessageNotModified:
                             pass
 
                     if batch["queue_done"] + batch["errors"] >= batch["total"]:
-                        log.info(f"Batch {batch_id} completed")
+                        log.info(f"Batch {batch_id} finished")
                         BATCHES.pop(batch_id, None)
 
                 await asyncio.sleep(5)
 
-            except FloodWait as e:
-                log.warning(f"FloodWait status_watcher {e.value}s")
-                await asyncio.sleep(e.value)
             except Exception:
                 log.exception("status_watcher error")
                 await asyncio.sleep(5)
@@ -68,42 +62,7 @@ app = MainBot(
 )
 
 # ======================================================
-# SINGLE MESSAGE
-# ======================================================
-@app.on_message(filters.private & filters.text & ~filters.command(["batch"]))
-async def single_handler(_, message):
-    try:
-        match = SOFTURL_REGEX.search(message.text)
-        if not match:
-            return
-
-        softurl = match.group()
-        log.info(f"Single task received: {softurl}")
-
-        copied = await app.copy_message(
-            Y_GROUP_ID,
-            message.chat.id,
-            message.id
-        )
-
-        status = await message.reply("⏳ Processing started...")
-
-        TASKS[softurl] = {
-            "y_chat": Y_GROUP_ID,
-            "y_msg_id": copied.id,
-            "status_chat": message.chat.id,
-            "status_msg": status.id,
-            "batch_id": None
-        }
-
-        await add_task(softurl, copied.id)
-
-    except Exception:
-        log.exception("single_handler error")
-
-
-# ======================================================
-# BATCH COMMAND
+# BATCH HANDLER (ONLY ENTRY POINT)
 # ======================================================
 @app.on_message(filters.private & filters.command("batch"))
 async def batch_handler(_, message):
@@ -119,7 +78,6 @@ async def batch_handler(_, message):
 
         chat, first_id = parse(parts[1])
         _, last_id = parse(parts[2])
-
         if first_id > last_id:
             first_id, last_id = last_id, first_id
 
@@ -159,7 +117,7 @@ async def batch_handler(_, message):
                     continue
 
                 softurl = match.group()
-                log.info(f"Batch {batch_id} → found {softurl}")
+                log.info(f"Batch {batch_id}: found {softurl}")
 
                 copied = await app.copy_message(Y_GROUP_ID, chat, msg_id)
 
@@ -173,7 +131,7 @@ async def batch_handler(_, message):
 
             except Exception:
                 BATCHES[batch_id]["errors"] += 1
-                log.exception(f"Batch {batch_id} message error")
+                log.exception("Batch message failed")
 
     except Exception:
         log.exception("batch_handler error")
