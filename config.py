@@ -6,7 +6,7 @@ SESSION_STRING = "BQGZqnkAtjrfnfxHu49K_E8IAinKmOFMYr_sIRS-gsmD-fTdpJszgAhXy8tQOS
 B_BOT_USERNAME = "Joe1Obot"     # without @
 
 X_BOT_USERNAME = "Nick_Bypass_Bot"     # without @
-Y_GROUP_ID = -1003871742191         # group id where mega link & /status2 goes
+Y_CHAT_ID = -1003871742191         # group id where mega link & /status2 goes
 STATUS_TIMEOUT = 60
 C_DOMAIN="softurl.in"
 
