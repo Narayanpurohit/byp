@@ -27,18 +27,14 @@ userbot = Client(
 )
 
 # ======================================================
-# ADD TASK (🔥 THIS WAS MISSING)
+# ENTRY POINT (called from main bot)
 # ======================================================
 async def add_task(softurl, y_msg_id):
-    """
-    Entry point called by main bot
-    """
     try:
         task = TASKS.get(softurl)
         if not task:
             return
 
-        # batch counter
         batch_id = task.get("batch_id")
         if batch_id and batch_id in BATCHES:
             BATCHES[batch_id]["a_done"] += 1
@@ -47,7 +43,7 @@ async def add_task(softurl, y_msg_id):
         await userbot.send_message(X_BOT_USERNAME, softurl)
 
         task["state"] = "sent_to_x"
-        log.info(f"Task started for {softurl}")
+        log.info(f"Task started: {softurl}")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
@@ -58,7 +54,7 @@ async def add_task(softurl, y_msg_id):
 
 
 # ======================================================
-# X BOT REPLY
+# X BOT REPLY → extract A link
 # ======================================================
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
 async def xbot_reply(_, message):
@@ -90,7 +86,7 @@ async def xbot_reply(_, message):
 
 
 # ======================================================
-# SEND A LINK TO B BOT (reply based)
+# SEND A LINK TO B BOT + reply /genlink
 # ======================================================
 async def send_A_to_B(A_link, softurl):
     try:
@@ -99,10 +95,11 @@ async def send_A_to_B(A_link, softurl):
             A_link
         )
 
+        # IMPORTANT: reply, not normal send
         await link_msg.reply("/genlink")
 
         TASKS[softurl]["state"] = "sent_to_b"
-        log.info("A link sent and /genlink replied properly")
+        log.info("A link sent to B bot")
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
@@ -111,7 +108,7 @@ async def send_A_to_B(A_link, softurl):
 
 
 # ======================================================
-# B BOT REPLY
+# B BOT REPLY (direct message, NOT reply)
 # ======================================================
 @userbot.on_message(filters.chat(B_BOT_USERNAME))
 async def bbot_reply(_, message):
@@ -125,11 +122,13 @@ async def bbot_reply(_, message):
 
         new_link = match.group()
 
+        # 🔑 queue-style: first task waiting for B bot
         for softurl, task in list(TASKS.items()):
             if task.get("state") != "sent_to_b":
                 continue
 
             final_link = new_link
+
             if SHORT_URL:
                 try:
                     final_link = await shorten_link(new_link)
@@ -137,12 +136,12 @@ async def bbot_reply(_, message):
                     pass
 
             await edit_y_message(softurl, final_link)
-            TASKS.pop(softurl, None)
 
             batch_id = task.get("batch_id")
             if batch_id and batch_id in BATCHES:
                 BATCHES[batch_id]["queue_done"] += 1
 
+            TASKS.pop(softurl, None)
             break
 
     except Exception:
@@ -150,7 +149,7 @@ async def bbot_reply(_, message):
 
 
 # ======================================================
-# EDIT Y MESSAGE
+# EDIT MESSAGE IN Y CHAT + STATUS UPDATE
 # ======================================================
 async def edit_y_message(softurl, final_link):
     task = TASKS[softurl]
@@ -161,6 +160,9 @@ async def edit_y_message(softurl, final_link):
     )
 
     text = msg.text or msg.caption
+    if not text:
+        return
+
     new_text = text.replace(softurl, final_link)
 
     try:
@@ -179,11 +181,18 @@ async def edit_y_message(softurl, final_link):
     except MessageNotModified:
         pass
 
-    await userbot.edit_message_text(
-        task["status_chat"],
-        task["status_msg"],
-        "✅ Processing completed"
-    )
+    # status message
+    try:
+        await userbot.edit_message_text(
+            task["status_chat"],
+            task["status_msg"],
+            "✅ Processing completed"
+        )
+    except MessageNotModified:
+        pass
 
 
+# ======================================================
+# START USERBOT
+# ======================================================
 userbot.start()
