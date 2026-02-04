@@ -1,12 +1,15 @@
-# userbot.py
 import re
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.errors import MessageNotModified
+from pyrogram.errors import FloodWait, MessageNotModified
 from logger import get_logger
 from config import (
-    API_ID, API_HASH, SESSION_STRING,
-    X_BOT_USERNAME, B_BOT_USERNAME, SHORT_URL
+    API_ID,
+    API_HASH,
+    SESSION_STRING,
+    X_BOT_USERNAME,
+    B_BOT_USERNAME,
+    SHORT_URL
 )
 from shared_store import TASKS, BATCHES
 from shortner import shorten_link
@@ -16,9 +19,6 @@ log = get_logger("USERBOT")
 SOFTURL_REGEX = re.compile(r"https?://softurl\.in/\S+", re.I)
 URL_REGEX = re.compile(r"https?://\S+")
 
-TASK_QUEUE = []
-CURRENT = None
-
 userbot = Client(
     "userbot",
     api_id=API_ID,
@@ -26,90 +26,137 @@ userbot = Client(
     session_string=SESSION_STRING
 )
 
-# ======================================================
-# ADD TASK FROM BOT
-# ======================================================
-async def add_task(softurl, _):
-    if softurl not in TASK_QUEUE:
-        TASK_QUEUE.append(softurl)
-        log.info(f"Queued: {softurl}")
-
-        batch_id = TASKS[softurl].get("batch_id")
-        if batch_id in BATCHES:
-            BATCHES[batch_id]["a_done"] += 1
-
 
 # ======================================================
-# MAIN QUEUE LOOP
+# QUEUE LOOP (ONE TASK AT A TIME)
 # ======================================================
-async def queue_loop():
-    global CURRENT
+async def queue_worker():
+    log.info("🚀 Queue worker started")
 
     while True:
-        if CURRENT is None and TASK_QUEUE:
-            CURRENT = TASK_QUEUE.pop(0)
-            log.info(f"Processing: {CURRENT}")
-            await userbot.send_message(X_BOT_USERNAME, CURRENT)
+        try:
+            for softurl, task in list(TASKS.items()):
+                if task.get("state") != "pending":
+                    continue
 
+                log.info(f"▶ Processing: {softurl}")
+                task["state"] = "sent_to_x"
+
+                await userbot.send_message(X_BOT_USERNAME, softurl)
+                await wait_for_completion(softurl)
+                break
+
+            await asyncio.sleep(1)
+
+        except Exception:
+            log.exception("queue_worker error")
+            await asyncio.sleep(2)
+
+
+# ======================================================
+# WAIT UNTIL TASK FINISHES
+# ======================================================
+async def wait_for_completion(softurl):
+    while softurl in TASKS:
         await asyncio.sleep(1)
 
 
 # ======================================================
-# X BOT REPLY
+# X BOT REPLY → A LINK
 # ======================================================
 @userbot.on_message(filters.chat(X_BOT_USERNAME))
 async def xbot_reply(_, message):
-    global CURRENT
-    if not CURRENT or not message.text:
-        return
+    try:
+        if not message.text:
+            return
 
-    if CURRENT not in message.text:
-        return
+        soft_match = SOFTURL_REGEX.search(message.text)
+        if not soft_match:
+            return
 
-    links = URL_REGEX.findall(message.text)
-    A_link = [l for l in links if l != CURRENT][0]
-    log.info(f"A link: {A_link}")
+        softurl = soft_match.group()
+        task = TASKS.get(softurl)
+        if not task:
+            return
 
-    msg = await userbot.send_message(B_BOT_USERNAME, A_link)
-    await msg.reply("/genlink")
+        links = URL_REGEX.findall(message.text)
+        A_link = [l for l in links if l != softurl][0]
+
+        task["A_link"] = A_link
+        task["state"] = "got_A"
+
+        batch_id = task.get("batch_id")
+        if batch_id in BATCHES:
+            BATCHES[batch_id]["a_done"] += 1
+
+        msg = await userbot.send_message(B_BOT_USERNAME, A_link)
+        await msg.reply("/genlink")
+
+        task["state"] = "sent_to_b"
+
+    except Exception:
+        log.exception("xbot_reply error")
 
 
 # ======================================================
-# B BOT REPLY
+# B BOT REPLY → FINAL LINK
 # ======================================================
 @userbot.on_message(filters.chat(B_BOT_USERNAME))
 async def bbot_reply(_, message):
-    global CURRENT
-    if not CURRENT or not message.text:
+    try:
+        if not message.text:
+            return
+
+        match = URL_REGEX.search(message.text)
+        if not match:
+            return
+
+        new_link = match.group()
+
+        for softurl, task in list(TASKS.items()):
+            if task.get("state") != "sent_to_b":
+                continue
+
+            final_link = new_link
+            if SHORT_URL:
+                final_link = await shorten_link(new_link)
+
+            await edit_y_message(task, softurl, final_link)
+
+            batch_id = task.get("batch_id")
+            if batch_id in BATCHES:
+                BATCHES[batch_id]["queue_done"] += 1
+
+            TASKS.pop(softurl, None)
+            log.info(f"✅ Task done: {softurl}")
+            break
+
+    except Exception:
+        log.exception("bbot_reply error")
+
+
+# ======================================================
+# EDIT Y CHAT MESSAGE
+# ======================================================
+async def edit_y_message(task, softurl, final_link):
+    msg = await userbot.get_messages(
+        task["y_chat"],
+        task["y_msg_id"]
+    )
+
+    text = msg.text or msg.caption
+    if not text:
         return
 
-    match = URL_REGEX.search(message.text)
-    if not match:
-        return
-
-    final = match.group()
-    if SHORT_URL:
-        final = await shorten_link(final)
-
-    task = TASKS[CURRENT]
-    msg = await userbot.get_messages(task["y_chat"], task["y_msg_id"])
-    text = (msg.text or msg.caption).replace(CURRENT, final)
+    new_text = text.replace(softurl, final_link)
 
     try:
         if msg.text:
-            await userbot.edit_message_text(task["y_chat"], task["y_msg_id"], text)
+            await userbot.edit_message_text(task["y_chat"], task["y_msg_id"], new_text)
         else:
-            await userbot.edit_message_caption(task["y_chat"], task["y_msg_id"], text)
+            await userbot.edit_message_caption(task["y_chat"], task["y_msg_id"], new_text)
     except MessageNotModified:
         pass
-
-    batch_id = task.get("batch_id")
-    if batch_id in BATCHES:
-        BATCHES[batch_id]["queue_done"] += 1
-
-    log.info(f"Done: {CURRENT}")
-    TASKS.pop(CURRENT)
-    CURRENT = None
 
 
 # ======================================================
@@ -117,8 +164,7 @@ async def bbot_reply(_, message):
 # ======================================================
 async def main():
     await userbot.start()
-    userbot.loop.create_task(queue_loop())
-    log.info("Userbot started (BATCH ONLY)")
+    asyncio.create_task(queue_worker())
     await asyncio.Event().wait()
 
 asyncio.run(main())
