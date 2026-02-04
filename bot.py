@@ -23,7 +23,6 @@ class MainBot(Client):
         self.loop.create_task(self.status_watcher())
 
     async def status_watcher(self):
-        """Edit status messages every 5 seconds (only if changed)"""
         while True:
             try:
                 for batch_id, batch in list(BATCHES.items()):
@@ -35,7 +34,6 @@ class MainBot(Client):
                         f"Errors: {batch['errors']}"
                     )
 
-                    # 🔐 edit only if changed
                     if batch.get("last_text") != text:
                         try:
                             await self.edit_message_text(
@@ -44,16 +42,18 @@ class MainBot(Client):
                                 text
                             )
                             batch["last_text"] = text
+                            log.info(f"Batch {batch_id} status updated")
                         except MessageNotModified:
                             pass
 
-                    # ✅ batch complete
                     if batch["queue_done"] + batch["errors"] >= batch["total"]:
+                        log.info(f"Batch {batch_id} completed")
                         BATCHES.pop(batch_id, None)
 
                 await asyncio.sleep(5)
 
             except FloodWait as e:
+                log.warning(f"FloodWait status_watcher {e.value}s")
                 await asyncio.sleep(e.value)
             except Exception:
                 log.exception("status_watcher error")
@@ -68,7 +68,7 @@ app = MainBot(
 )
 
 # ======================================================
-# SINGLE MESSAGE HANDLER
+# SINGLE MESSAGE
 # ======================================================
 @app.on_message(filters.private & filters.text & ~filters.command(["batch"]))
 async def single_handler(_, message):
@@ -78,6 +78,7 @@ async def single_handler(_, message):
             return
 
         softurl = match.group()
+        log.info(f"Single task received: {softurl}")
 
         copied = await app.copy_message(
             Y_GROUP_ID,
@@ -88,22 +89,21 @@ async def single_handler(_, message):
         status = await message.reply("⏳ Processing started...")
 
         TASKS[softurl] = {
+            "y_chat": Y_GROUP_ID,
             "y_msg_id": copied.id,
             "status_chat": message.chat.id,
             "status_msg": status.id,
             "batch_id": None
         }
 
-        asyncio.create_task(add_task(softurl, copied.id))
+        await add_task(softurl, copied.id)
 
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
     except Exception:
         log.exception("single_handler error")
 
 
 # ======================================================
-# BATCH HANDLER
+# BATCH COMMAND
 # ======================================================
 @app.on_message(filters.private & filters.command("batch"))
 async def batch_handler(_, message):
@@ -124,6 +124,7 @@ async def batch_handler(_, message):
             first_id, last_id = last_id, first_id
 
         batch_id = str(uuid.uuid4())[:8]
+        log.info(f"Batch started: {batch_id}")
 
         status = await message.reply(
             "📦 Batch Processing\n\n"
@@ -158,24 +159,24 @@ async def batch_handler(_, message):
                     continue
 
                 softurl = match.group()
+                log.info(f"Batch {batch_id} → found {softurl}")
 
                 copied = await app.copy_message(Y_GROUP_ID, chat, msg_id)
 
                 TASKS[softurl] = {
+                    "y_chat": Y_GROUP_ID,
                     "y_msg_id": copied.id,
                     "batch_id": batch_id
                 }
 
-                asyncio.create_task(add_task(softurl, copied.id))
+                await add_task(softurl, copied.id)
 
             except Exception:
                 BATCHES[batch_id]["errors"] += 1
+                log.exception(f"Batch {batch_id} message error")
 
     except Exception:
         log.exception("batch_handler error")
 
 
-# ======================================================
-# START BOT
-# ======================================================
 app.run()
