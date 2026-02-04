@@ -1,9 +1,7 @@
-import asyncio
-import json
-import re
+import asyncio, uuid
 from pyrogram import Client, filters
 from config import *
-from userbot import start_userbot
+from userbot import start_batch_userbot
 
 bot = Client(
     "bot",
@@ -12,78 +10,48 @@ bot = Client(
     bot_token=BOT_TOKEN
 )
 
-# ---------- JSON helpers ----------
-def load_tasks():
+@bot.on_message(filters.command("batch"))
+async def batch_handler(_, message):
     try:
-        with open("tasks.json", "r") as f:
-            return json.load(f)
-    except:
-        return {}
+        parts = message.text.split()
+        if len(parts) != 3:
+            return await message.reply(
+                "❌ Usage:\n/batch first_msg_link last_msg_link"
+            )
 
-def save_tasks(data):
-    with open("tasks.json", "w") as f:
-        json.dump(data, f, indent=2)
+        def parse(link):
+            p = link.rstrip("/").split("/")
+            return p[-2], int(p[-1])
 
-# ---------- STATUS UPDATER ----------
-async def status_updater(msg):
-    while True:
-        tasks = load_tasks()
-        total = len(tasks)
-        done = sum(1 for x in tasks.values() if x.get("short"))
+        chat, first_id = parse(parts[1])
+        _, last_id = parse(parts[2])
 
-        await msg.edit(
-            f"""
-📊 **Batch Status**
+        if first_id > last_id:
+            first_id, last_id = last_id, first_id
 
-Total Links : `{total}`
-Completed  : `{done}`
-Pending    : `{total-done}`
+        batch_id = str(uuid.uuid4())[:8]
 
-⏳ Auto update every 5 sec
-"""
+        status = await message.reply(
+            "📦 **Batch Processing Started**\n\n"
+            "Total: calculating...\n"
+            "A-links collected: 0\n"
+            "Processed: 0\n"
+            "Errors: 0"
         )
 
-        if total and total == done:
-            await msg.edit("✅ **Batch Completed Successfully**")
-            break
+        asyncio.create_task(
+            start_batch_userbot(
+                bot=bot,
+                chat=chat,
+                first_id=first_id,
+                last_id=last_id,
+                status_chat=message.chat.id,
+                status_msg=status.id,
+                batch_id=batch_id
+            )
+        )
 
-        await asyncio.sleep(5)
-
-# ---------- /batch COMMAND ----------
-@bot.on_message(filters.command("batch"))
-async def batch_handler(_, msg):
-    try:
-        _, first, last = msg.text.split()
-        first = int(first.split("/")[-1])
-        last = int(last.split("/")[-1])
-    except:
-        return await msg.reply("❌ Use:\n/batch first_msg_link last_msg_link")
-
-    status = await msg.reply("🚀 **Process Started...**")
-    tasks = load_tasks()
-
-    async for m in bot.get_chat_history(msg.chat.id, offset_id=first - 1):
-        if m.id > last:
-            continue
-
-        text = (m.text or "").replace(REPLACE_FROM, REPLACE_TO)
-        sent = await bot.send_message(Y_CHAT_ID, text)
-
-        for link in re.findall(r"https?://\S+", text):
-            if C_DOMAIN in link:
-                tasks[link] = {
-                    "msg_id": sent.id,
-                    "A": "",
-                    "B": "",
-                    "short": ""
-                }
-
-        if m.id == last:
-            break
-
-    save_tasks(tasks)
-
-    asyncio.create_task(status_updater(status))
-    asyncio.create_task(start_userbot(bot))
+    except Exception as e:
+        await message.reply(f"❌ Error: `{e}`")
 
 bot.run()
