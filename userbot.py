@@ -210,7 +210,7 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
                 }
                 STATUS_CTX["total"] += 1
                 await user.send_message(X_BOT_USERNAME, c)
-                await asyncio.sleep(6)  # 0.5 second gap
+                await asyncio.sleep(5)  # 0.5 second gap
 
             save_tasks(tasks)
 
