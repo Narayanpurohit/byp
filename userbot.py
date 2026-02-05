@@ -22,9 +22,16 @@ user = Client(
 
 URL_REGEX = re.compile(r"https?://\S+")
 
+# 🔥 Shared status (BOT reads this)
+STATUS_CTX = {
+    "total": 0,
+    "a_ready": 0,
+    "done": 0,
+    "errors": 0
+}
+
 EXPECTED_C = 0
 PROCESSING_STARTED = False
-STATUS_CTX = {}
 
 # ---------------- JSON ----------------
 def load_tasks():
@@ -38,22 +45,6 @@ def save_tasks(data):
     with open("tasks.json", "w") as f:
         json.dump(data, f, indent=2)
 
-# ---------------- STATUS UPDATE ----------------
-async def update_status():
-    tasks = load_tasks()
-    await user.edit_message_text(
-        STATUS_CTX["chat"],
-        STATUS_CTX["msg"],
-        f"""
-📦 Batch Status
-
-C links total : {EXPECTED_C}
-A links ready : {sum(1 for t in tasks.values() if t["A"])}
-Processed     : {STATUS_CTX["done"]}
-Errors        : {STATUS_CTX["errors"]}
-"""
-    )
-
 # ---------------- X BOT HANDLER ----------------
 @user.on_message(filters.chat(X_BOT_USERNAME) & filters.reply)
 async def xbot_reply(_, message):
@@ -64,7 +55,6 @@ async def xbot_reply(_, message):
 
     reply_links = URL_REGEX.findall(reply)
     msg_links = URL_REGEX.findall(text)
-
     if not reply_links or not msg_links:
         return
 
@@ -78,13 +68,12 @@ async def xbot_reply(_, message):
     tasks[c_link]["A"] = a_link
     save_tasks(tasks)
 
+    STATUS_CTX["a_ready"] += 1
     log.info(f"A stored | {c_link}")
-    await update_status()
 
-    if sum(1 for t in tasks.values() if t["A"]) == EXPECTED_C:
-        if not PROCESSING_STARTED:
-            PROCESSING_STARTED = True
-            asyncio.create_task(process_all_links())
+    if STATUS_CTX["a_ready"] == STATUS_CTX["total"] and not PROCESSING_STARTED:
+        PROCESSING_STARTED = True
+        asyncio.create_task(process_all_links())
 
 # ---------------- PHASE 2 ----------------
 async def process_all_links():
@@ -101,7 +90,7 @@ async def process_all_links():
                     b_link = r.text
                     short = await shorten_link(b_link)
 
-                    # 🔥 USERBOT edits copied message
+                    # 🔥 USERBOT edits Y_CHAT_ID
                     await user.edit_message_text(
                         Y_CHAT_ID,
                         data["msg_id"],
@@ -113,8 +102,6 @@ async def process_all_links():
                     save_tasks(tasks)
 
                     STATUS_CTX["done"] += 1
-                    await update_status()
-
                     log.info(f"Completed | {c_link}")
                     break
 
@@ -125,27 +112,19 @@ async def process_all_links():
             log.exception(f"Failed | {c_link}")
 
 # ---------------- PHASE 1 ----------------
-async def start_batch_userbot(
-    chat,
-    first_id,
-    last_id,
-    status_chat,
-    status_msg,
-    batch_id
-):
-    global EXPECTED_C, PROCESSING_STARTED, STATUS_CTX
+async def start_batch_userbot(chat, first_id, last_id, batch_id):
+    global EXPECTED_C, PROCESSING_STARTED
 
     await user.start()
     save_tasks({})
-    EXPECTED_C = 0
     PROCESSING_STARTED = False
 
-    STATUS_CTX = {
-        "chat": status_chat,
-        "msg": status_msg,
+    STATUS_CTX.update({
+        "total": 0,
+        "a_ready": 0,
         "done": 0,
         "errors": 0
-    }
+    })
 
     for msg_id in range(first_id, last_id + 1):
         try:
@@ -170,13 +149,12 @@ async def start_batch_userbot(
                     "msg_id": copied.id,
                     "A": ""
                 }
-                EXPECTED_C += 1
+                STATUS_CTX["total"] += 1
                 await user.send_message(X_BOT_USERNAME, c)
 
             save_tasks(tasks)
-            await update_status()
 
         except Exception:
             STATUS_CTX["errors"] += 1
 
-    log.info(f"Phase 1 done | waiting for {EXPECTED_C} A links")
+    log.info(f"Phase 1 done | waiting for {STATUS_CTX['total']} A links")
