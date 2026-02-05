@@ -133,11 +133,14 @@ async def process_all_links():
             if not current_text:
                 raise Exception("Message has no editable text")
 
-            # 5️⃣ REPLACE ONLY C LINK
+            # 5️⃣ REPLACE ONLY C LINK REPLACE_FROM
             if c_link in current_text:
                 new_text = current_text.replace(c_link, short)
+                
             else:
                 new_text = current_text + f"\n\n{short}"
+            new_text = new_text.replace(REPLACE_FROM, REPLACE_TO)
+
 
             # 6️⃣ EDIT MESSAGE
             if msg.caption is not None:
