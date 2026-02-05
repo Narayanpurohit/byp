@@ -85,6 +85,7 @@ async def process_all_links():
             # 1️⃣ Send A → B bot
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
             await sent.reply("/genlink")
+            await asyncio.sleep(5)
 
             # 2️⃣ Wait for B bot reply
             async for r in user.get_chat_history(B_BOT_USERNAME, limit=5):
