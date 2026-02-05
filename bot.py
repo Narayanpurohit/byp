@@ -5,14 +5,12 @@ from pyrogram import Client, filters
 from config import *
 from userbot import start_batch_userbot
 
-# ---------------- LOGGING ----------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | BOT | %(levelname)s | %(message)s"
 )
 log = logging.getLogger(__name__)
 
-# ---------------- BOT CLIENT ----------------
 bot = Client(
     "bot",
     api_id=API_ID,
@@ -20,7 +18,6 @@ bot = Client(
     bot_token=BOT_TOKEN
 )
 
-# ---------------- /batch COMMAND ----------------
 @bot.on_message(filters.command("batch"))
 async def batch_handler(_, message):
     try:
@@ -36,18 +33,17 @@ async def batch_handler(_, message):
 
         chat, first_id = parse(parts[1])
         _, last_id = parse(parts[2])
-
         if first_id > last_id:
             first_id, last_id = last_id, first_id
 
         batch_id = str(uuid.uuid4())[:8]
-        log.info(f"Batch started | id={batch_id} | {chat}:{first_id}-{last_id}")
+        log.info(f"Batch started {batch_id}")
 
         status = await message.reply(
-            "📦 **Batch Processing Started**\n\n"
-            "Total messages: calculating...\n"
+            "📦 Batch Started\n\n"
+            "C links found: 0\n"
+            "A links ready: 0\n"
             "Processed: 0\n"
-            "A-links found: 0\n"
             "Errors: 0"
         )
 
@@ -63,8 +59,8 @@ async def batch_handler(_, message):
             )
         )
 
-    except Exception as e:
+    except Exception:
         log.exception("Batch handler failed")
-        await message.reply(f"❌ Error: `{e}`")
+        await message.reply("❌ Internal error")
 
 bot.run()
