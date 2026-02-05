@@ -39,9 +39,9 @@ def save_tasks(data):
         json.dump(data, f, indent=2)
 
 # ---------------- STATUS UPDATE ----------------
-async def update_status(bot):
+async def update_status():
     tasks = load_tasks()
-    await bot.edit_message_text(
+    await user.edit_message_text(
         STATUS_CTX["chat"],
         STATUS_CTX["msg"],
         f"""
@@ -79,6 +79,7 @@ async def xbot_reply(_, message):
     save_tasks(tasks)
 
     log.info(f"A stored | {c_link}")
+    await update_status()
 
     if sum(1 for t in tasks.values() if t["A"]) == EXPECTED_C:
         if not PROCESSING_STARTED:
@@ -87,7 +88,7 @@ async def xbot_reply(_, message):
 
 # ---------------- PHASE 2 ----------------
 async def process_all_links():
-    log.info("All A links collected → starting processing phase")
+    log.info("Processing phase started")
 
     tasks = load_tasks()
     for c_link, data in list(tasks.items()):
@@ -100,7 +101,8 @@ async def process_all_links():
                     b_link = r.text
                     short = await shorten_link(b_link)
 
-                    await bot.edit_message_text(
+                    # 🔥 USERBOT edits copied message
+                    await user.edit_message_text(
                         Y_CHAT_ID,
                         data["msg_id"],
                         short
@@ -111,7 +113,7 @@ async def process_all_links():
                     save_tasks(tasks)
 
                     STATUS_CTX["done"] += 1
-                    await update_status(bot)
+                    await update_status()
 
                     log.info(f"Completed | {c_link}")
                     break
@@ -124,7 +126,6 @@ async def process_all_links():
 
 # ---------------- PHASE 1 ----------------
 async def start_batch_userbot(
-    bot,
     chat,
     first_id,
     last_id,
@@ -157,7 +158,11 @@ async def start_batch_userbot(
             if not c_links:
                 continue
 
-            copied = await bot.copy_message(Y_CHAT_ID, chat, msg_id)
+            copied = await user.copy_message(
+                Y_CHAT_ID,
+                chat,
+                msg_id
+            )
 
             tasks = load_tasks()
             for c in c_links:
@@ -169,7 +174,7 @@ async def start_batch_userbot(
                 await user.send_message(X_BOT_USERNAME, c)
 
             save_tasks(tasks)
-            await update_status(bot)
+            await update_status()
 
         except Exception:
             STATUS_CTX["errors"] += 1
