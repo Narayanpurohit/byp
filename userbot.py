@@ -22,7 +22,6 @@ user = Client(
 
 URL_REGEX = re.compile(r"https?://\S+")
 
-# 🔥 Shared status (BOT reads this)
 STATUS_CTX = {
     "total": 0,
     "a_ready": 0,
@@ -30,7 +29,6 @@ STATUS_CTX = {
     "errors": 0
 }
 
-EXPECTED_C = 0
 PROCESSING_STARTED = False
 
 # ---------------- JSON ----------------
@@ -50,11 +48,12 @@ def save_tasks(data):
 async def xbot_reply(_, message):
     global PROCESSING_STARTED
 
-    reply = message.reply_to_message.text or ""
+    reply_text = message.reply_to_message.text or ""
     text = message.text or ""
 
-    reply_links = URL_REGEX.findall(reply)
+    reply_links = URL_REGEX.findall(reply_text)
     msg_links = URL_REGEX.findall(text)
+
     if not reply_links or not msg_links:
         return
 
@@ -80,30 +79,56 @@ async def process_all_links():
     log.info("Processing phase started")
 
     tasks = load_tasks()
+
     for c_link, data in list(tasks.items()):
         try:
+            # 1️⃣ Send A → B bot
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
             await sent.reply("/genlink")
 
+            # 2️⃣ Wait for B bot reply
             async for r in user.get_chat_history(B_BOT_USERNAME, limit=5):
-                if r.text and "http" in r.text:
-                    b_link = r.text
-                    short = await shorten_link(b_link)
+                if not r.text or "http" not in r.text:
+                    continue
 
-                    # 🔥 USERBOT edits Y_CHAT_ID
+                b_link = r.text.strip()
+                short = await shorten_link(b_link)
+
+                # 3️⃣ FETCH CURRENT MESSAGE FROM Y_CHAT_ID
+                msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
+                current_text = msg.caption if msg.caption is not None else msg.text
+
+                if not current_text:
+                    raise Exception("Message has no editable text")
+
+                # 4️⃣ REPLACE ONLY C LINK
+                if c_link in current_text:
+                    new_text = current_text.replace(c_link, short)
+                else:
+                    new_text = current_text + f"\n\n{short}"
+
+                # 5️⃣ EDIT MESSAGE (text / caption auto)
+                if msg.caption is not None:
+                    await user.edit_message_caption(
+                        Y_CHAT_ID,
+                        data["msg_id"],
+                        new_text
+                    )
+                else:
                     await user.edit_message_text(
                         Y_CHAT_ID,
                         data["msg_id"],
-                        short
+                        new_text
                     )
 
-                    tasks = load_tasks()
-                    tasks.pop(c_link, None)
-                    save_tasks(tasks)
+                # 6️⃣ CLEANUP
+                tasks = load_tasks()
+                tasks.pop(c_link, None)
+                save_tasks(tasks)
 
-                    STATUS_CTX["done"] += 1
-                    log.info(f"Completed | {c_link}")
-                    break
+                STATUS_CTX["done"] += 1
+                log.info(f"Completed | {c_link}")
+                break
 
         except FloodWait as e:
             await asyncio.sleep(e.value)
@@ -113,7 +138,7 @@ async def process_all_links():
 
 # ---------------- PHASE 1 ----------------
 async def start_batch_userbot(chat, first_id, last_id, batch_id):
-    global EXPECTED_C, PROCESSING_STARTED
+    global PROCESSING_STARTED
 
     await user.start()
     save_tasks({})
