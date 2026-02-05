@@ -7,12 +7,14 @@ from pyrogram.errors import FloodWait
 from config import *
 from shortner import shorten_link
 
+# ---------------- LOGGING ----------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | USERBOT | %(levelname)s | %(message)s"
 )
 log = logging.getLogger(__name__)
 
+# ---------------- CLIENT ----------------
 user = Client(
     "userbot",
     api_id=API_ID,
@@ -22,6 +24,7 @@ user = Client(
 
 URL_REGEX = re.compile(r"https?://\S+")
 
+# ---------------- STATUS (BOT READS) ----------------
 STATUS_CTX = {
     "total": 0,
     "a_ready": 0,
@@ -29,7 +32,12 @@ STATUS_CTX = {
     "errors": 0
 }
 
-PROCESSING_STARTED = False
+# ---------------- FLAGS ----------------
+CURRENT_PROCESSING = None          # c_link
+PROCESS_LOCK = asyncio.Lock()
+PROCESS_TIMEOUT_TASK = None        # asyncio.Task
+
+TIMEOUT_SECONDS = 20
 
 # ---------------- JSON ----------------
 def load_tasks():
@@ -43,11 +51,55 @@ def save_tasks(data):
     with open("tasks.json", "w") as f:
         json.dump(data, f, indent=2)
 
-# ---------------- X BOT HANDLER ----------------
+# ---------------- START NEXT PROCESS ----------------
+async def start_next_process():
+    global CURRENT_PROCESSING, PROCESS_TIMEOUT_TASK
+
+    async with PROCESS_LOCK:
+        if CURRENT_PROCESSING is not None:
+            return
+
+        tasks = load_tasks()
+        for c_link, data in tasks.items():
+            if data.get("state") == "READY":
+                CURRENT_PROCESSING = c_link
+                data["state"] = "PROCESSING"
+                save_tasks(tasks)
+
+                log.info(f"▶ Processing started | {c_link}")
+
+                sent = await user.send_message(B_BOT_USERNAME, data["A"])
+                await sent.reply("/genlink")
+
+                PROCESS_TIMEOUT_TASK = asyncio.create_task(
+                    processing_timeout(c_link)
+                )
+                return
+
+# ---------------- TIMEOUT HANDLER ----------------
+async def processing_timeout(c_link):
+    global CURRENT_PROCESSING
+
+    await asyncio.sleep(TIMEOUT_SECONDS)
+
+    if CURRENT_PROCESSING != c_link:
+        return
+
+    log.error(f"⏱ Timeout | {c_link}")
+
+    tasks = load_tasks()
+    if c_link in tasks:
+        tasks[c_link]["state"] = "READY"
+        save_tasks(tasks)
+
+    CURRENT_PROCESSING = None
+    STATUS_CTX["errors"] += 1
+
+    await start_next_process()
+
+# ---------------- X BOT HANDLER (A LINK) ----------------
 @user.on_message(filters.chat(X_BOT_USERNAME) & filters.reply)
 async def xbot_reply(_, message):
-    global PROCESSING_STARTED
-
     reply_text = message.reply_to_message.text or ""
     text = message.text or ""
 
@@ -65,85 +117,75 @@ async def xbot_reply(_, message):
         return
 
     tasks[c_link]["A"] = a_link
+    tasks[c_link]["state"] = "READY"
     save_tasks(tasks)
 
     STATUS_CTX["a_ready"] += 1
     log.info(f"A stored | {c_link}")
 
-    if STATUS_CTX["a_ready"] == STATUS_CTX["total"] and not PROCESSING_STARTED:
-        PROCESSING_STARTED = True
-        asyncio.create_task(process_all_links())
+    if STATUS_CTX["a_ready"] == STATUS_CTX["total"]:
+        await start_next_process()
 
-# ---------------- PHASE 2 ----------------
-async def process_all_links():
-    log.info("Processing phase started")
+# ---------------- B BOT EDIT HANDLER ----------------
+@user.on_message(filters.chat(B_BOT_USERNAME) & filters.edited)
+async def bbot_edited(_, message):
+    global CURRENT_PROCESSING, PROCESS_TIMEOUT_TASK
 
-    tasks = load_tasks()
+    if CURRENT_PROCESSING is None:
+        return
 
-    for c_link, data in list(tasks.items()):
-        try:
-            # 1️⃣ Send A → B bot
-            sent = await user.send_message(B_BOT_USERNAME, data["A"])
-            await sent.reply("/genlink")
-            await asyncio.sleep(5)
+    if not message.text or "http" not in message.text:
+        return
 
-            # 2️⃣ Wait for B bot reply
-            async for r in user.get_chat_history(B_BOT_USERNAME, limit=5):
-                if not r.text or "http" not in r.text:
-                    continue
+    b_link = message.text.strip()
+    c_link = CURRENT_PROCESSING
 
-                b_link = r.text.strip()
-                short = await shorten_link(b_link)
+    try:
+        short = await shorten_link(b_link)
 
-                # 3️⃣ FETCH CURRENT MESSAGE FROM Y_CHAT_ID
-                msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
-                current_text = msg.caption if msg.caption is not None else msg.text
+        tasks = load_tasks()
+        data = tasks.get(c_link)
+        if not data:
+            return
 
-                if not current_text:
-                    raise Exception("Message has no editable text")
+        msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
+        current_text = msg.caption if msg.caption else msg.text
+        if not current_text:
+            raise Exception("No editable text")
 
-                # 4️⃣ REPLACE ONLY C LINK
-                if c_link in current_text:
-                    new_text = current_text.replace(c_link, short)
-                else:
-                    new_text = current_text + f"\n\n{short}"
+        new_text = (
+            current_text.replace(c_link, short)
+            if c_link in current_text
+            else current_text + f"\n\n{short}"
+        )
 
-                # 5️⃣ EDIT MESSAGE (text / caption auto)
-                if msg.caption is not None:
-                    await user.edit_message_caption(
-                        Y_CHAT_ID,
-                        data["msg_id"],
-                        new_text
-                    )
-                else:
-                    await user.edit_message_text(
-                        Y_CHAT_ID,
-                        data["msg_id"],
-                        new_text
-                    )
+        if msg.caption:
+            await user.edit_message_caption(Y_CHAT_ID, msg.id, new_text)
+        else:
+            await user.edit_message_text(Y_CHAT_ID, msg.id, new_text)
 
-                # 6️⃣ CLEANUP
-                tasks = load_tasks()
-                tasks.pop(c_link, None)
-                save_tasks(tasks)
+        tasks.pop(c_link, None)
+        save_tasks(tasks)
 
-                STATUS_CTX["done"] += 1
-                log.info(f"Completed | {c_link}")
-                break
+        STATUS_CTX["done"] += 1
+        log.info(f"✅ Completed | {c_link}")
 
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-        except Exception:
-            STATUS_CTX["errors"] += 1
-            log.exception(f"Failed | {c_link}")
+    except Exception:
+        STATUS_CTX["errors"] += 1
+        log.exception("Finalize failed")
 
-# ---------------- PHASE 1 ----------------
+    finally:
+        if PROCESS_TIMEOUT_TASK:
+            PROCESS_TIMEOUT_TASK.cancel()
+            PROCESS_TIMEOUT_TASK = None
+
+        CURRENT_PROCESSING = None
+        await start_next_process()
+
+# ---------------- PHASE 1 (COLLECT C LINKS) ----------------
 async def start_batch_userbot(chat, first_id, last_id, batch_id):
-    global PROCESSING_STARTED
-
     await user.start()
     save_tasks({})
-    PROCESSING_STARTED = False
 
     STATUS_CTX.update({
         "total": 0,
@@ -163,24 +205,23 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
             if not c_links:
                 continue
 
-            copied = await user.copy_message(
-                Y_CHAT_ID,
-                chat,
-                msg_id
-            )
+            copied = await user.copy_message(Y_CHAT_ID, chat, msg_id)
 
             tasks = load_tasks()
             for c in c_links:
                 tasks[c] = {
                     "msg_id": copied.id,
-                    "A": ""
+                    "A": "",
+                    "state": "PENDING"
                 }
                 STATUS_CTX["total"] += 1
                 await user.send_message(X_BOT_USERNAME, c)
 
             save_tasks(tasks)
 
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
         except Exception:
             STATUS_CTX["errors"] += 1
 
-    log.info(f"Phase 1 done | waiting for {STATUS_CTX['total']} A links")
+    log.info(f"📦 Phase-1 done | Waiting for {STATUS_CTX['total']} A links")
