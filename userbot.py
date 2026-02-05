@@ -57,7 +57,7 @@ def save_tasks(data):
         json.dump(data, f, indent=2)
 
 # ---------------- WAIT & CHECK B BOT ----------------
-async def wait_and_get_b_link(timeout=15):
+async def wait_and_get_b_link(timeout=30):
     """
     Wait fixed time, then check LAST message
     from B_BOT_USERNAME for a link.
@@ -116,7 +116,7 @@ async def process_all_links():
             await sent.reply("/genlink")
 
             # 2️⃣ WAIT 15 SEC & CHECK LAST MSG
-            b_link = await wait_and_get_b_link(timeout=15)
+            b_link = await wait_and_get_b_link(timeout=30)
 
             if not b_link:
                 log.warning(f"No B link after 15s | {c_link}")
