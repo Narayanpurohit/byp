@@ -18,33 +18,55 @@ bot = Client(
     bot_token=BOT_TOKEN
 )
 
-async def status_watcher(chat_id, msg_id):
-    while True:
-        await bot.edit_message_text(
-            chat_id,
-            msg_id,
-            f"""
-📦 Batch Status
+LAST_STATUS_TEXT = None
 
-C links total : {STATUS_CTX["total"]}
-A links ready : {STATUS_CTX["a_ready"]}
-Processed     : {STATUS_CTX["done"]}
-Errors        : {STATUS_CTX["errors"]}
-"""
+async def status_watcher(chat_id, msg_id):
+    global LAST_STATUS_TEXT
+
+    while True:
+        await asyncio.sleep(5)
+
+        status_text = (
+            "📦 Batch Status\n\n"
+            f"C links total : {STATUS_CTX['total']}\n"
+            f"A links ready : {STATUS_CTX['a_ready']}\n"
+            f"Processed     : {STATUS_CTX['done']}\n"
+            f"Errors        : {STATUS_CTX['errors']}"
         )
 
-        if STATUS_CTX["done"] >= STATUS_CTX["total"] and STATUS_CTX["total"] != 0:
+        # ❌ SAME STATUS → SKIP EDIT
+        if status_text == LAST_STATUS_TEXT:
+            continue
+
+        try:
             await bot.edit_message_text(
                 chat_id,
                 msg_id,
-                "✅ Batch Completed Successfully"
+                status_text
             )
+            LAST_STATUS_TEXT = status_text
+
+        except Exception as e:
+            log.warning(f"Status edit skipped: {e}")
+
+        # ✅ COMPLETION CHECK
+        if STATUS_CTX["done"] >= STATUS_CTX["total"] and STATUS_CTX["total"] != 0:
+            try:
+                await bot.edit_message_text(
+                    chat_id,
+                    msg_id,
+                    "✅ Batch Completed Successfully"
+                )
+            except Exception:
+                pass
             break
 
-        await asyncio.sleep(5)
 
 @bot.on_message(filters.command("batch"))
 async def batch_handler(_, message):
+    global LAST_STATUS_TEXT
+    LAST_STATUS_TEXT = None   # 🔥 reset for new batch
+
     parts = message.text.split()
     if len(parts) != 3:
         return await message.reply(
