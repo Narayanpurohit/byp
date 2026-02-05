@@ -35,6 +35,16 @@ STATUS_CTX = {
 PROCESSING_STARTED = False
 
 # ---------------- JSON ----------------
+async def safe_start(client):
+    """
+    Starts pyrogram client only if not already connected
+    """
+    if client.is_connected:
+        log.info("Client already connected, skipping start()")
+        return
+    await client.start()
+    log.info("Client started")
+    
 def load_tasks():
     try:
         with open("tasks.json", "r") as f:
@@ -161,7 +171,7 @@ async def process_all_links():
 async def start_batch_userbot(chat, first_id, last_id, batch_id):
     global PROCESSING_STARTED
 
-    await user.start()
+    await safe_start(user)
     save_tasks({})
     PROCESSING_STARTED = False
 
