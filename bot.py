@@ -37,19 +37,18 @@ async def batch_handler(_, message):
             first_id, last_id = last_id, first_id
 
         batch_id = str(uuid.uuid4())[:8]
-        log.info(f"Batch started {batch_id}")
+        log.info(f"Batch started | {batch_id}")
 
         status = await message.reply(
             "📦 Batch Started\n\n"
-            "C links found: 0\n"
-            "A links ready: 0\n"
-            "Processed: 0\n"
-            "Errors: 0"
+            "C links total : 0\n"
+            "A links ready : 0\n"
+            "Processed     : 0\n"
+            "Errors        : 0"
         )
 
         asyncio.create_task(
             start_batch_userbot(
-                bot=bot,
                 chat=chat,
                 first_id=first_id,
                 last_id=last_id,
