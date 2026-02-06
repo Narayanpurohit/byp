@@ -7,11 +7,15 @@ from pyrogram.errors import FloodWait
 from config import *
 from shortner import shorten_link
 
+# ---------------- LOGGING ----------------
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | USERBOT | %(levelname)s | %(message)s"
 )
 log = logging.getLogger(__name__)
+
+# ---------------- CLIENT ----------------
 
 user = Client(
     "userbot",
@@ -19,6 +23,10 @@ user = Client(
     api_hash=API_HASH,
     session_string=SESSION_STRING
 )
+
+USERBOT_STARTED = False
+
+# ---------------- CONSTANTS ----------------
 
 URL_REGEX = re.compile(r"https?://\S+")
 
@@ -31,7 +39,7 @@ STATUS_CTX = {
 
 PROCESSING_STARTED = False
 
-# ---------------- JSON ----------------
+# ---------------- SAFE START ----------------
 
 async def safe_start_userbot():
     global USERBOT_STARTED
@@ -39,9 +47,11 @@ async def safe_start_userbot():
     if USERBOT_STARTED:
         return
 
-    await safe_start_userbot()
+    await user.start()
     USERBOT_STARTED = True
     log.info("Userbot started")
+
+# ---------------- JSON ----------------
 
 def load_tasks():
     try:
@@ -82,7 +92,6 @@ async def xbot_reply(_, message):
     STATUS_CTX["a_ready"] += 1
     log.info(f"A stored | {c_link}")
 
-    # 🔥 start phase-2 only when all A ready
     if STATUS_CTX["a_ready"] == STATUS_CTX["total"] and not PROCESSING_STARTED:
         PROCESSING_STARTED = True
         asyncio.create_task(start_b_phase())
@@ -90,6 +99,7 @@ async def xbot_reply(_, message):
 # ---------------- PHASE 2 STARTER ----------------
 
 async def start_b_phase():
+    await safe_start_userbot()
     log.info("Starting B-bot phase")
 
     tasks = load_tasks()
@@ -98,7 +108,7 @@ async def start_b_phase():
         try:
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
             await sent.reply("/genlink")
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
         except Exception:
             STATUS_CTX["errors"] += 1
             log.exception(f"Failed sending A to B | {c_link}")
@@ -123,7 +133,6 @@ async def bbot_reply(_, message):
 
         tasks = load_tasks()
 
-        # find matching task by A link
         target_c = None
         for c, d in tasks.items():
             if d.get("A") == a_link and not d.get("B"):
@@ -137,8 +146,6 @@ async def bbot_reply(_, message):
         save_tasks(tasks)
 
         log.info(f"B stored | {target_c}")
-
-        # continue processing
         asyncio.create_task(finalize_task(target_c))
 
     except Exception:
@@ -149,33 +156,31 @@ async def bbot_reply(_, message):
 
 async def finalize_task(c_link):
     try:
+        await safe_start_userbot()
+
         tasks = load_tasks()
         data = tasks.get(c_link)
-        if not data:
+        if not data or not data.get("B"):
             return
 
         short = await shorten_link(data["B"])
 
         msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
         current_text = msg.caption if msg.caption else msg.text
-
         if not current_text:
             raise Exception("No editable text")
 
-        new_text = (
-            current_text.replace(c_link, short)
-            if c_link in current_text
-            else current_text + f"\n\n{short}"
-        )
-        new_text = (
-            current_text.replace(REPLACE_FROM, REPLACE_TO))
+        # 🔥 ONLY replace C link
+        if c_link in current_text:
+            new_text = current_text.replace(c_link, short)
+        else:
+            new_text = current_text + f"\n\n{short}"
 
         if msg.caption:
             await user.edit_message_caption(Y_CHAT_ID, data["msg_id"], new_text)
         else:
             await user.edit_message_text(Y_CHAT_ID, data["msg_id"], new_text)
 
-        # cleanup
         tasks.pop(c_link, None)
         save_tasks(tasks)
 
@@ -192,6 +197,8 @@ async def finalize_task(c_link):
 
 async def start_batch_userbot(chat, first_id, last_id, batch_id):
     global PROCESSING_STARTED
+
+    await safe_start_userbot()
 
     PROCESSING_STARTED = False
     save_tasks({})
