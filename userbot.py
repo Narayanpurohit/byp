@@ -26,6 +26,7 @@ user = Client(
 
 USERBOT_STARTED = False
 PROCESSING_STARTED = False
+PHASE1_DONE = False
 
 # ---------------- CONSTANTS ----------------
 
@@ -88,8 +89,12 @@ async def xbot_reply(_, message):
     STATUS_CTX["a_ready"] += 1
     log.info(f"A stored | {c_link}")
 
-    # 🔥 AUTO START B PHASE ONLY WHEN ALL A READY
-    if STATUS_CTX["a_ready"] == STATUS_CTX["total"] and not PROCESSING_STARTED:
+    # 🔒 START B PHASE ONLY IF PHASE-1 IS DONE
+    if (
+        PHASE1_DONE
+        and STATUS_CTX["a_ready"] == STATUS_CTX["total"]
+        and not PROCESSING_STARTED
+    ):
         PROCESSING_STARTED = True
         asyncio.create_task(start_b_phase())
 
@@ -195,10 +200,12 @@ async def finalize_task(c_link):
 # ---------------- PHASE 1 (C LINK COLLECT) ----------------
 
 async def start_batch_userbot(chat, first_id, last_id, batch_id):
-    global PROCESSING_STARTED
+    global PROCESSING_STARTED, PHASE1_DONE
 
     await safe_start_userbot()
+
     PROCESSING_STARTED = False
+    PHASE1_DONE = False
     save_tasks({})
 
     STATUS_CTX.update({
@@ -228,7 +235,6 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
                     "A": "",
                     "B": ""
                 }
-                c= "B "+c
                 STATUS_CTX["total"] += 1
                 await user.send_message(X_BOT_USERNAME, c)
 
@@ -236,4 +242,17 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
 
         except Exception:
             STATUS_CTX["errors"] += 1
-            log.exception("Phase 1 error")
+            log.exception("Phase-1 error")
+
+    # 🔒 PHASE-1 COMPLETED
+    PHASE1_DONE = True
+    log.info("Phase-1 completed | waiting for A links")
+
+    # edge case: all A already arrived
+    if (
+        STATUS_CTX["a_ready"] == STATUS_CTX["total"]
+        and STATUS_CTX["total"] > 0
+        and not PROCESSING_STARTED
+    ):
+        PROCESSING_STARTED = True
+        asyncio.create_task(start_b_phase())
