@@ -7,14 +7,12 @@ from pyrogram.errors import FloodWait
 from config import *
 from shortner import shorten_link
 
-# ---------------- LOGGING ----------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | USERBOT | %(levelname)s | %(message)s"
 )
 log = logging.getLogger(__name__)
 
-# ---------------- CLIENT ----------------
 user = Client(
     "userbot",
     api_id=API_ID,
@@ -24,7 +22,6 @@ user = Client(
 
 URL_REGEX = re.compile(r"https?://\S+")
 
-# ---------------- STATUS (BOT READS) ----------------
 STATUS_CTX = {
     "total": 0,
     "a_ready": 0,
@@ -35,16 +32,7 @@ STATUS_CTX = {
 PROCESSING_STARTED = False
 
 # ---------------- JSON ----------------
-async def safe_start(client):
-    """
-    Starts pyrogram client only if not already connected
-    """
-    if client.is_connected:
-        log.info("Client already connected, skipping start()")
-        return
-    await client.start()
-    log.info("Client started")
-    
+
 def load_tasks():
     try:
         with open("tasks.json", "r") as f:
@@ -56,23 +44,8 @@ def save_tasks(data):
     with open("tasks.json", "w") as f:
         json.dump(data, f, indent=2)
 
-# ---------------- WAIT & CHECK B BOT ----------------
-async def wait_and_get_b_link(timeout=10):
-    """
-    Wait fixed time, then check LAST message
-    from B_BOT_USERNAME for a link.
-    """
-    await asyncio.sleep(timeout)
-
-    async for msg in user.get_chat_history(B_BOT_USERNAME, limit=1):
-        if msg.text:
-            links = URL_REGEX.findall(msg.text)
-            if links:
-                return links[-1]
-
-    return None
-
 # ---------------- X BOT HANDLER (A LINK) ----------------
+
 @user.on_message(filters.chat(X_BOT_USERNAME) & filters.reply)
 async def xbot_reply(_, message):
     global PROCESSING_STARTED
@@ -99,86 +72,117 @@ async def xbot_reply(_, message):
     STATUS_CTX["a_ready"] += 1
     log.info(f"A stored | {c_link}")
 
+    # 🔥 start phase-2 only when all A ready
     if STATUS_CTX["a_ready"] == STATUS_CTX["total"] and not PROCESSING_STARTED:
         PROCESSING_STARTED = True
-        asyncio.create_task(process_all_links())
+        asyncio.create_task(start_b_phase())
 
-# ---------------- PHASE 2 ----------------
-async def process_all_links():
-    log.info("Processing phase started")
+# ---------------- PHASE 2 STARTER ----------------
+
+async def start_b_phase():
+    log.info("Starting B-bot phase")
 
     tasks = load_tasks()
 
-    for c_link, data in list(tasks.items()):
+    for c_link, data in tasks.items():
         try:
-            # 1️⃣ Send A → B bot
-            await user.send_message(B_BOT_USERNAME, "/genlink")
-            await asyncio.sleep(4)
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
-            #await sent.reply()
-
-            # 2️⃣ WAIT 15 SEC & CHECK LAST MSG
-            b_link = await wait_and_get_b_link(timeout=10)
-
-            if not b_link:
-                log.warning(f"No B link after 15s | {c_link}")
-                STATUS_CTX["errors"] += 1
-                continue
-
-            # 3️⃣ SHORTEN
-            short = await shorten_link(b_link)
-
-            # 4️⃣ FETCH MESSAGE FROM Y_CHAT_ID
-            msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
-            current_text = msg.caption if msg.caption is not None else msg.text
-
-            if not current_text:
-                raise Exception("Message has no editable text")
-
-            # 5️⃣ REPLACE ONLY C LINK REPLACE_FROM
-            if c_link in current_text:
-                new_text = current_text.replace(c_link, short)
-                
-            else:
-                new_text = current_text + f"\n\n{short}"
-            new_text = new_text.replace(REPLACE_FROM, REPLACE_TO)
-
-
-            # 6️⃣ EDIT MESSAGE
-            if msg.caption is not None:
-                await user.edit_message_caption(
-                    Y_CHAT_ID,
-                    data["msg_id"],
-                    new_text
-                )
-            else:
-                await user.edit_message_text(
-                    Y_CHAT_ID,
-                    data["msg_id"],
-                    new_text
-                )
-
-            # 7️⃣ CLEANUP
-            tasks = load_tasks()
-            tasks.pop(c_link, None)
-            save_tasks(tasks)
-
-            STATUS_CTX["done"] += 1
-            log.info(f"✅ Completed | {c_link}")
-
-        except FloodWait as e:
+            await sent.reply("/genlink")
             await asyncio.sleep(e.value)
         except Exception:
             STATUS_CTX["errors"] += 1
-            log.exception(f"Failed | {c_link}")
+            log.exception(f"Failed sending A to B | {c_link}")
 
-# ---------------- PHASE 1 (COLLECT C LINKS) ----------------
+# ---------------- B BOT HANDLER (B LINK) ----------------
+
+@user.on_message(filters.chat(B_BOT_USERNAME) & filters.reply)
+async def bbot_reply(_, message):
+    try:
+        text = message.text or ""
+        links = URL_REGEX.findall(text)
+        if not links:
+            return
+
+        b_link = links[-1]
+
+        reply = message.reply_to_message
+        if not reply or not reply.text:
+            return
+
+        a_link = reply.text.strip()
+
+        tasks = load_tasks()
+
+        # find matching task by A link
+        target_c = None
+        for c, d in tasks.items():
+            if d.get("A") == a_link and not d.get("B"):
+                target_c = c
+                break
+
+        if not target_c:
+            return
+
+        tasks[target_c]["B"] = b_link
+        save_tasks(tasks)
+
+        log.info(f"B stored | {target_c}")
+
+        # continue processing
+        asyncio.create_task(finalize_task(target_c))
+
+    except Exception:
+        STATUS_CTX["errors"] += 1
+        log.exception("B bot handler failed")
+
+# ---------------- FINAL PROCESS ----------------
+
+async def finalize_task(c_link):
+    try:
+        tasks = load_tasks()
+        data = tasks.get(c_link)
+        if not data:
+            return
+
+        short = await shorten_link(data["B"])
+
+        msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
+        current_text = msg.caption if msg.caption else msg.text
+
+        if not current_text:
+            raise Exception("No editable text")
+
+        new_text = (
+            current_text.replace(c_link, short)
+            if c_link in current_text
+            else current_text + f"\n\n{short}"
+        )
+
+        if msg.caption:
+            await user.edit_message_caption(Y_CHAT_ID, data["msg_id"], new_text)
+        else:
+            await user.edit_message_text(Y_CHAT_ID, data["msg_id"], new_text)
+
+        # cleanup
+        tasks.pop(c_link, None)
+        save_tasks(tasks)
+
+        STATUS_CTX["done"] += 1
+        log.info(f"Completed | {c_link}")
+
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+    except Exception:
+        STATUS_CTX["errors"] += 1
+        log.exception(f"Finalize failed | {c_link}")
+
+# ---------------- PHASE 1 (C LINK COLLECT) ----------------
+
 async def start_batch_userbot(chat, first_id, last_id, batch_id):
     global PROCESSING_STARTED
 
-    await safe_start(user)
-    save_tasks({})
     PROCESSING_STARTED = False
+    save_tasks({})
 
     STATUS_CTX.update({
         "total": 0,
@@ -198,28 +202,20 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
             if not c_links:
                 continue
 
-            copied = await user.copy_message(
-                Y_CHAT_ID,
-                chat,
-                msg_id
-            )
+            copied = await user.copy_message(Y_CHAT_ID, chat, msg_id)
 
             tasks = load_tasks()
             for c in c_links:
                 tasks[c] = {
                     "msg_id": copied.id,
-                    "A": ""
+                    "A": "",
+                    "B": ""
                 }
-                c= "B "+c
                 STATUS_CTX["total"] += 1
                 await user.send_message(X_BOT_USERNAME, c)
-                #await asyncio.sleep(1)  # 0.5 second gap
 
             save_tasks(tasks)
 
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
         except Exception:
             STATUS_CTX["errors"] += 1
-
-    log.info(f"📦 Phase 1 done | Waiting for {STATUS_CTX['total']} A links")
+            log.exception("Phase 1 error")
