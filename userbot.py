@@ -57,7 +57,7 @@ def save_tasks(data):
         json.dump(data, f, indent=2)
 
 # ---------------- WAIT & CHECK B BOT ----------------
-async def wait_and_get_b_link(timeout=30):
+async def wait_and_get_b_link(timeout=10):
     """
     Wait fixed time, then check LAST message
     from B_BOT_USERNAME for a link.
