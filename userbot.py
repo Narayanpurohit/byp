@@ -25,6 +25,7 @@ user = Client(
 )
 
 USERBOT_STARTED = False
+PROCESSING_STARTED = False
 
 # ---------------- CONSTANTS ----------------
 
@@ -37,16 +38,12 @@ STATUS_CTX = {
     "errors": 0
 }
 
-PROCESSING_STARTED = False
-
 # ---------------- SAFE START ----------------
 
 async def safe_start_userbot():
     global USERBOT_STARTED
-
     if USERBOT_STARTED:
         return
-
     await user.start()
     USERBOT_STARTED = True
     log.info("Userbot started")
@@ -75,7 +72,6 @@ async def xbot_reply(_, message):
 
     reply_links = URL_REGEX.findall(reply_text)
     msg_links = URL_REGEX.findall(text)
-
     if not reply_links or not msg_links:
         return
 
@@ -92,26 +88,30 @@ async def xbot_reply(_, message):
     STATUS_CTX["a_ready"] += 1
     log.info(f"A stored | {c_link}")
 
+    # 🔥 AUTO START B PHASE ONLY WHEN ALL A READY
     if STATUS_CTX["a_ready"] == STATUS_CTX["total"] and not PROCESSING_STARTED:
         PROCESSING_STARTED = True
         asyncio.create_task(start_b_phase())
 
-# ---------------- PHASE 2 STARTER ----------------
+# ---------------- PHASE 2 (A → B BOT) ----------------
 
 async def start_b_phase():
     await safe_start_userbot()
-    log.info("Starting B-bot phase")
+    log.info("B-bot phase started")
 
     tasks = load_tasks()
 
     for c_link, data in tasks.items():
+        if not data.get("A") or data.get("B"):
+            continue
+
         try:
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
             await sent.reply("/genlink")
-            #await asyncio.sleep(2)
+            await asyncio.sleep(2)
         except Exception:
             STATUS_CTX["errors"] += 1
-            log.exception(f"Failed sending A to B | {c_link}")
+            log.exception(f"A → B failed | {c_link}")
 
 # ---------------- B BOT HANDLER (B LINK) ----------------
 
@@ -130,7 +130,6 @@ async def bbot_reply(_, message):
             return
 
         a_link = reply.text.strip()
-
         tasks = load_tasks()
 
         target_c = None
@@ -166,15 +165,15 @@ async def finalize_task(c_link):
         short = await shorten_link(data["B"])
 
         msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
-        current_text = msg.caption if msg.caption else msg.text
-        if not current_text:
-            raise Exception("No editable text")
+        current = msg.caption if msg.caption else msg.text
+        if not current:
+            return
 
-        # 🔥 ONLY replace C link
-        if c_link in current_text:
-            new_text = current_text.replace(c_link, short)
+        # ✅ ONLY REPLACE C LINK
+        if c_link in current:
+            new_text = current.replace(c_link, short)
         else:
-            new_text = current_text + f"\n\n{short}"
+            new_text = current + f"\n\n{short}"
 
         if msg.caption:
             await user.edit_message_caption(Y_CHAT_ID, data["msg_id"], new_text)
@@ -199,7 +198,6 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
     global PROCESSING_STARTED
 
     await safe_start_userbot()
-
     PROCESSING_STARTED = False
     save_tasks({})
 
@@ -231,9 +229,7 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
                     "B": ""
                 }
                 STATUS_CTX["total"] += 1
-                c="b "+c
                 await user.send_message(X_BOT_USERNAME, c)
-                #await asyncio.sleep(3)
 
             save_tasks(tasks)
 
