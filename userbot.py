@@ -112,11 +112,13 @@ async def process_all_links():
     for c_link, data in list(tasks.items()):
         try:
             # 1️⃣ Send A → B bot
+            await user.send_message(B_BOT_USERNAME, "/genlink")
+            await asyncio.sleep(4)
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
-            await sent.reply("/genlink")
+            #await sent.reply()
 
             # 2️⃣ WAIT 15 SEC & CHECK LAST MSG
-            b_link = await wait_and_get_b_link(timeout=30)
+            b_link = await wait_and_get_b_link(timeout=10)
 
             if not b_link:
                 log.warning(f"No B link after 15s | {c_link}")
