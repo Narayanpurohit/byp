@@ -62,6 +62,25 @@ async def status_watcher(chat_id, msg_id):
                 pass
             break
 
+@bot.on_message(filters.command("continue"))
+async def continue_handler(_, message):
+    try:
+        from userbot import start_b_phase, STATUS_CTX
+
+        if STATUS_CTX["total"] == 0:
+            return await message.reply("⚠️ No active batch found")
+
+        await start_b_phase()
+
+        await message.reply(
+            "▶️ Continue triggered\n\n"
+            "Processing available A-links.\n"
+            "Missing A-links will be skipped."
+        )
+
+    except Exception as e:
+        await message.reply(f"❌ Failed to continue\n{e}")
+
 @bot.on_message(filters.command("get"))
 async def get_json(_, message):
     if not os.path.exists("tasks.json"):
