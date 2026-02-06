@@ -228,6 +228,7 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
                     "A": "",
                     "B": ""
                 }
+                c= "B "+c
                 STATUS_CTX["total"] += 1
                 await user.send_message(X_BOT_USERNAME, c)
 
