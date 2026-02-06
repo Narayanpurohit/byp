@@ -88,7 +88,7 @@ async def start_b_phase():
         try:
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
             await sent.reply("/genlink")
-            await asyncio.sleep(e.value)
+            await asyncio.sleep(3)
         except Exception:
             STATUS_CTX["errors"] += 1
             log.exception(f"Failed sending A to B | {c_link}")
