@@ -39,6 +39,26 @@ STATUS_CTX = {
     "errors": 0
 }
 
+async def resend_missing_a_links():
+    await safe_start_userbot()
+
+    tasks = load_tasks()
+    resend_count = 0
+
+    for c_link, data in tasks.items():
+        if not data.get("A"):
+            try:
+                await user.send_message(X_BOT_USERNAME, c_link)
+                resend_count += 1
+                await asyncio.sleep(1)
+            except Exception:
+                STATUS_CTX["errors"] += 1
+                log.exception(f"Resend failed | {c_link}")
+
+    log.info(f"Resend completed | sent {resend_count} C links to X bot")
+    return resend_count
+
+
 # ---------------- SAFE START ----------------
 
 async def safe_start_userbot():
