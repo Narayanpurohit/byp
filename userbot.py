@@ -33,6 +33,16 @@ PROCESSING_STARTED = False
 
 # ---------------- JSON ----------------
 
+async def safe_start_userbot():
+    global USERBOT_STARTED
+
+    if USERBOT_STARTED:
+        return
+
+    await safe_start_userbot()
+    USERBOT_STARTED = True
+    log.info("Userbot started")
+
 def load_tasks():
     try:
         with open("tasks.json", "r") as f:
