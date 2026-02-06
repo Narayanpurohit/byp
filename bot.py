@@ -5,6 +5,8 @@ import uuid
 from pyrogram import Client, filters
 from config import *
 from userbot import start_batch_userbot, STATUS_CTX,start_b_phase
+from userbot import resend_missing_a_links
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,7 +63,22 @@ async def status_watcher(chat_id, msg_id):
             except Exception:
                 pass
             break
+@bot.on_message(filters.command("resend"))
+async def resend_handler(_, message):
+    await message.reply("🔁 Resending missing A links to X bot...")
 
+    try:
+        count = await resend_missing_a_links()
+
+        await message.reply(
+            f"✅ Resend completed\n\n"
+            f"Missing C links resent: {count}"
+        )
+    except Exception as e:
+        await message.reply("❌ Resend failed, check logs")
+        log.exception("Resend command failed")
+        
+        
 @bot.on_message(filters.command("continue"))
 async def continue_handler(_, message):
     try:
