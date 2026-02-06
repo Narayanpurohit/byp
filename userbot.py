@@ -108,7 +108,7 @@ async def start_b_phase():
         try:
             sent = await user.send_message(B_BOT_USERNAME, data["A"])
             await sent.reply("/genlink")
-            await asyncio.sleep(2)
+            #await asyncio.sleep(2)
         except Exception:
             STATUS_CTX["errors"] += 1
             log.exception(f"Failed sending A to B | {c_link}")
@@ -233,7 +233,7 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
                 STATUS_CTX["total"] += 1
                 c="b "+c
                 await user.send_message(X_BOT_USERNAME, c)
-                await asyncio.sleep(3)
+                #await asyncio.sleep(3)
 
             save_tasks(tasks)
 
