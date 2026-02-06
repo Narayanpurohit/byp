@@ -61,6 +61,33 @@ async def status_watcher(chat_id, msg_id):
                 pass
             break
 
+@bot.on_message(filters.command("get"))
+async def get_json(_, message):
+    if not os.path.exists("tasks.json"):
+        return await message.reply("⚠️ tasks.json file does not exist")
+
+    if os.path.getsize("tasks.json") == 0:
+        return await message.reply("⚠️ tasks.json is empty")
+
+    try:
+        await message.reply_document(
+            document="tasks.json",
+            caption="📄 Current tasks.json"
+        )
+    except Exception as e:
+        await message.reply(f"❌ Failed to send file\n{e}")
+        
+@bot.on_message(filters.command("clean"))
+async def clean_json(_, message):
+    try:
+        with open("tasks.json", "w") as f:
+            f.write("{}")
+
+        await message.reply("🧹 tasks.json cleared successfully")
+    except Exception as e:
+        await message.reply(f"❌ Failed to clean file\n{e}")
+
+
 
 @bot.on_message(filters.command("batch"))
 async def batch_handler(_, message):
