@@ -202,6 +202,7 @@ async def finalize_task(c_link):
             new_text = current.replace(c_link, short)
         else:
             new_text = current + f"\n\n{short}"
+        new_text = current.replace(REPLACE_FROM, REPLACE_TO)
         log.info(f"short link replaced ")
         if msg.caption:
             await user.edit_message_caption(Y_CHAT_ID, data["msg_id"], new_text)
