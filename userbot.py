@@ -48,6 +48,7 @@ async def resend_missing_a_links():
     for c_link, data in tasks.items():
         if not data.get("A"):
             try:
+                c= "B "+c
                 await user.send_message(X_BOT_USERNAME, c_link)
                 resend_count += 1
                 await asyncio.sleep(1)
