@@ -206,6 +206,7 @@ async def finalize_task(c_link):
             await user.edit_message_caption(Y_CHAT_ID, data["msg_id"], new_text)
         else:
             await user.edit_message_text(Y_CHAT_ID, data["msg_id"], new_text)
+        msg_id = data["msg_id"]
         log.info(f"Y msg edited | {msg_id}")
         tasks.pop(c_link, None)
         save_tasks(tasks)
