@@ -181,6 +181,7 @@ async def bbot_reply(_, message):
 async def finalize_task(c_link):
     try:
         await safe_start_userbot()
+        log.info(f"B process started | {c_link}")
 
         tasks = load_tasks()
         data = tasks.get(c_link)
@@ -188,6 +189,7 @@ async def finalize_task(c_link):
             return
 
         short = await shorten_link(data["B"])
+        log.info(f"B link shorted | {short}")
 
         msg = await user.get_messages(Y_CHAT_ID, data["msg_id"])
         current = msg.caption if msg.caption else msg.text
@@ -199,12 +201,12 @@ async def finalize_task(c_link):
             new_text = current.replace(c_link, short)
         else:
             new_text = current + f"\n\n{short}"
-
+        log.info(f"short link replaced ")
         if msg.caption:
             await user.edit_message_caption(Y_CHAT_ID, data["msg_id"], new_text)
         else:
             await user.edit_message_text(Y_CHAT_ID, data["msg_id"], new_text)
-
+        log.info(f"Y msg edited | {msg_id}")
         tasks.pop(c_link, None)
         save_tasks(tasks)
 
