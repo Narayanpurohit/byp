@@ -275,9 +275,15 @@ async def start_batch_userbot(chat, first_id, last_id, batch_id):
     log.info("Phase-1 completed | waiting for A links")
 
     # edge case: all A already arrived
+    tasks = load_tasks()
+    total_c = len(tasks)
+    with_a = 0
+    for data in tasks.values():
+        if data.get("A"):
+            with_a += 1
     if (
-        STATUS_CTX["a_ready"] == STATUS_CTX["total"]
-        and STATUS_CTX["total"] > 0
+        with_a == total_c
+        and total_c > 0
         and not PROCESSING_STARTED
     ):
         PROCESSING_STARTED = True
